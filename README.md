@@ -62,8 +62,8 @@ Follow the prompts to configure your remote storage and save the configuration
 
 ### 1. Clone this repository:
 ```bash
-git clone <repository-url>
-cd <repository-directory>
+git clone https://github.com/keshon/backup-to-remote.git
+cd https://github.com/keshon/backup-to-remote.git
 ```
 
 ### 2. Create and configure your .env file:
@@ -76,6 +76,9 @@ Edit .env to set your configuration values (see `🌟 Configuration` section abo
 ```bash
 chmod +x backup.sh upload.sh cleanup.sh stats.sh
 ```
+
+### 4. Fill out the .env file:
+Check the `🌟 Configuration` section above
 
 ## 🚀 Running the Scripts
 Main script:
