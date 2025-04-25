@@ -29,7 +29,7 @@ check_required_tools() {
     local missing_tools=()
     
     # List of required tools
-    local required_tools=("rclone" "bc" "zip")
+    local required_tools=("rclone" "zip")
     
     for tool in "${required_tools[@]}"; do
         if ! command -v "$tool" &> /dev/null; then
