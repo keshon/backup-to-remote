@@ -1,51 +1,59 @@
 #!/bin/bash
 
 # Description:
-# This script shows statistics of the specified rclone folder, including
-# a list of files and their sizes, total occupied space, and remaining space if available.
+# This script shows statistics of the specified remote folder, including
+# a list of files and their sizes, total occupied space, and remote storage info (used, total, free).
 
 # Load environment variables from .env file
 source .env
 
-# Function to convert bytes to human-readable format with one decimal place
+# Function to convert bytes to human-readable format using binary units
 fmt_size() {
     local size=$1
-    if [ $size -lt 1024 ]; then
-        printf "%.1f B" "$size"
-    elif [ $size -lt 1048576 ]; then
-        printf "%.1f KB" "$(echo "scale=1; $size / 1024" | bc)"
-    elif [ $size -lt 1073741824 ]; then
-        printf "%.1f MB" "$(echo "scale=1; $size / 1048576" | bc)"
-    else
-        printf "%.1f GB" "$(echo "scale=1; $size / 1073741824" | bc)"
-    fi
+    awk -v size="$size" '
+    function human(x, suffix) {
+        printf "%.1f %s", x, suffix
+        exit
+    }
+    BEGIN {
+        if (size < 1024) human(size, "B")
+        else if (size < 1048576) human(size / 1024, "KiB")
+        else if (size < 1073741824) human(size / 1048576, "MiB")
+        else human(size / 1073741824, "GiB")
+    }'
 }
+
 
 # Use supplied argument as remote path if provided
 if [ -n "$1" ]; then
     REMOTE_PATH=$1
 fi
 
-# List files in the remote path with their sizes
-echo "Listing files in ${RCLONE_CONFIG_NAME}:${REMOTE_PATH} with their sizes:"
-rclone ls ${RCLONE_CONFIG_NAME}:${REMOTE_PATH} --config "$RCLONE_CONFIG_PATH" | while read -r size path; do
-    printf "%-8s\t%s\n" "$(fmt_size $size)" "$path"
+# Header
+echo "Remote: ${RCLONE_CONFIG_NAME}"
+echo "Path: /${REMOTE_PATH}"
+printf "\n%-10s\t%s\n" "Size" "File"
+echo "-------------------------------------------"
+
+# List files with formatted sizes
+rclone ls "${RCLONE_CONFIG_NAME}:${REMOTE_PATH}" --config "$RCLONE_CONFIG_PATH" | while read -r size path; do
+    printf "%-10s\t%s\n" "$(fmt_size "$size")" "$path"
 done
 
-# Calculate total occupied space
-echo -e "\nCalculating total occupied space in ${RCLONE_CONFIG_NAME}:${REMOTE_PATH}:"
-total_space=$(rclone size ${RCLONE_CONFIG_NAME}:${REMOTE_PATH} --config "$RCLONE_CONFIG_PATH" | grep 'Total size' | awk '{print $3}')
-echo "Total occupied space: $total_space"
+# Total occupied space (matching binary units)
+total_size=$(rclone size "${RCLONE_CONFIG_NAME}:${REMOTE_PATH}" --config "$RCLONE_CONFIG_PATH" | grep 'Total size' | awk '{print $3 " " $4}')
+echo -e "\nOccupied space: $total_size"
 
-# Attempt to get remaining space (if supported)
-echo -e "\nAttempting to calculate remaining space in ${RCLONE_CONFIG_NAME}:${REMOTE_PATH}:"
-remaining_space=$(rclone about ${RCLONE_CONFIG_NAME}:${REMOTE_PATH} --config "$RCLONE_CONFIG_PATH" | grep 'Free space' | awk '{print $3}')
+# Remote capacity stats
+echo -e "\nChecking remote storage info..."
+about_output=$(rclone about "${RCLONE_CONFIG_NAME}:${REMOTE_PATH}" --config "$RCLONE_CONFIG_PATH")
 
-# Check if remaining_space is not empty
-if [ -z "$remaining_space" ]; then
-    echo "Remaining space information not available."
-else
-    echo "Remaining space: $remaining_space"
-fi
+total_remote=$(echo "$about_output" | grep 'Total:' | awk '{print $2 " " $3}')
+used_remote=$(echo "$about_output" | grep 'Used:' | awk '{print $2 " " $3}')
+free_remote=$(echo "$about_output" | grep 'Free:' | awk '{print $2 " " $3}')
 
-echo -e "\nStatistics gathering completed."
+echo -e "Total space:   $total_remote"
+echo -e "Used space:    $used_remote"
+echo -e "Free space:    $free_remote"
+
+echo -e "\nStatistics gathering completed. Now go do something useful with your life."
