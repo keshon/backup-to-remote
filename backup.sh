@@ -74,21 +74,9 @@ backup_if_changed() {
     # Create a file list for the current state of the directory
     find "$app_path" -type f -printf '%T@ %p\n' | sort -k 2 > "$current_backup_file"
 
-    # Compare file list hashes for performance
-    local hash_now
-    local hash_then
-    hash_now=$(sha256sum "$current_backup_file" | awk '{print $1}')
-    
     # If no previous backup file, treat it as "changes detected"
     if [ ! -f "$last_backup_file" ]; then
         log "📦 No previous backup for $app_path. Creating initial backup."
-    else
-        hash_then=$(sha256sum "$last_backup_file" | awk '{print $1}')
-    fi
-
-    # If hashes don't match, create a new backup
-    if [ "$hash_now" != "${hash_then:-$hash_now}" ]; then
-        log "📂 Changes detected in $app_path. Creating new backup."
         local archive_file="${LOCAL_BACKUP_PATH}/${app_name}_$(date +%Y%m%d%H%M%S).zip"
         zip -rq "$archive_file" "$app_path"
         mv "$current_backup_file" "$last_backup_file"
@@ -97,24 +85,48 @@ backup_if_changed() {
         announce_action "Cleaning up backups for $app_name"
         "$CLEANING_SCRIPT" "$LOCAL_BACKUP_PATH"
     else
-        log "✅ No changes in $app_path. Skipping backup."
-        rm -f "$current_backup_file"
+        # Compare file list hashes for performance
+        local hash_now
+        local hash_then
+        hash_now=$(sha256sum "$current_backup_file" | awk '{print $1}')
+        hash_then=$(sha256sum "$last_backup_file" | awk '{print $1}')
+
+        # If hashes don't match, create a new backup
+        if [ "$hash_now" != "$hash_then" ]; then
+            log "📂 Changes detected in $app_path. Creating new backup."
+            local archive_file="${LOCAL_BACKUP_PATH}/${app_name}_$(date +%Y%m%d%H%M%S).zip"
+            zip -rq "$archive_file" "$app_path"
+            mv "$current_backup_file" "$last_backup_file"
+            announce_action "Uploading new backup for $app_name"
+            "$UPLOAD_SCRIPT" "$archive_file"
+            announce_action "Cleaning up backups for $app_name"
+            "$CLEANING_SCRIPT" "$LOCAL_BACKUP_PATH"
+        else
+            log "✅ No changes in $app_path. Skipping backup."
+            rm -f "$current_backup_file"
+        fi
     fi
 }
 
 # Ensure the backups match app_paths.txt
 sync_backups_with_paths() {
-    # Read the current list of app paths
     mapfile -t current_paths < "$LIST_FILE"
-    
-    # Loop over all backups and check if they match with current paths
+
+    # Loop through backups
     for backup_file in "$LOCAL_BACKUP_PATH"/*_last_backup.txt; do
         local app_name
         app_name=$(basename "$backup_file" "_last_backup.txt")
+        
+        # Attempt to find app path in the list
         local app_path
-        app_path=$(grep -m 1 "$app_name" "$LIST_FILE" || true)
+        app_path=""
+        for path in "${current_paths[@]}"; do
+            if [[ "$path" == *"$app_name"* ]]; then
+                app_path="$path"
+                break
+            fi
+        done
 
-        # If the app name is not found in the list file, delete its backup
         if [ -z "$app_path" ]; then
             log "🧹 Backup for $app_name not found in $LIST_FILE. Deleting the backup."
             rm -f "$backup_file"
@@ -122,6 +134,7 @@ sync_backups_with_paths() {
         fi
     done
 }
+
 
 # Make sure all required tools are installed
 check_required_tools
