@@ -33,4 +33,4 @@ else
     exit 1
 fi
 
-echo "Uploading operations completed."
+echo -e "Uploading completed.\n"

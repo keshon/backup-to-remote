@@ -56,4 +56,4 @@ echo -e "Total space:   $total_remote"
 echo -e "Used space:    $used_remote"
 echo -e "Free space:    $free_remote"
 
-echo -e "\nStatistics gathering completed. Now go do something useful with your life."
+echo -e "\nStatistics complete.\nNow go do something useful with your life.\n"
