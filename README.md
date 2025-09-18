@@ -19,7 +19,7 @@ A modular and maintainable backup solution using **Bash + rclone** for local and
 
 ## Features
 
-- Back up multiple directories specified in `app_paths.txt`.
+- Back up multiple directories specified in `paths` file.
 - Only create new backups when changes are detected.
 - Upload backups to a remote storage via **rclone**.
 - Keep a configurable number of backup copies on the remote.
@@ -44,10 +44,10 @@ backup-to-remote/
 ├── n8n/
 │   └── n8n_workflow_example.json  # n8n workflow
 ├── .env                           # Environment variables (not committed)
-├── app_paths.txt                  # List of directories to back up
 ├── backup.sh                      # Main backup script
 ├── cleanup.sh                     # Cleanup old backups (local + remote)
 ├── LICENSE                        # MIT License
+├── paths.example                  # List of directories to back up
 ├── rclone.conf                    # Optional: rclone configuration (or pass via env)
 ├── README.md                      # Documentation
 ├── stats.sh                       # Generate storage statistics
@@ -154,7 +154,7 @@ git clone https://github.com/keshon/backup-to-remote
 cd backup-to-remote
 ```
 
-2. Edit `app_paths.txt` — one absolute path per line.
+2. Edit `paths` file — one absolute path per line.
 
 3. Create `.env` from the example and edit as needed:
 
