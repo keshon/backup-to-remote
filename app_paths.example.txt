@@ -1,0 +1,3 @@
+/opt/project1
+/opt/project2
+/opt/project3

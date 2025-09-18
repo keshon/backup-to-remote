@@ -1,0 +1,173 @@
+{
+  "name": "Keshon Server Backup (timeweb)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "8ca4af36-60b6-41c1-b3eb-532bec3e2671",
+      "name": "When clicking ‘Test workflow’",
+      "type": "n8n-nodes-base.manualTrigger",
+      "position": [848, 368],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 5 * * WED"
+            }
+          ]
+        }
+      },
+      "id": "dcc3d47b-179f-4ca5-8e6a-2b03e4efe4a3",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [848, 176],
+      "notesInFlow": true,
+      "notes": "0 (Minute): 0th minute, 5 (Hour): 5 AM, Day of Week: Wednesday"
+    },
+    {
+      "parameters": {
+        "path": "webhook-path-placeholder",
+        "authentication": "basicAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [848, 0],
+      "id": "a61264ed-a154-4b10-b5f2-50597f673829",
+      "name": "Webhook",
+      "webhookId": "webhook-id-placeholder",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "basic-auth-placeholder",
+          "name": "BasicAdmin"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "rclone_conf_id",
+              "name": "rclone_conf",
+              "value": "REDACTED_RCLONE_CONFIG",
+              "type": "string"
+            },
+            {
+              "id": "rclone_conf_name_id",
+              "name": "rclone_conf_name_selected",
+              "value": "union-koofr",
+              "type": "string"
+            },
+            {
+              "id": "remote_path_id",
+              "name": "remote_path",
+              "value": "tw-cute-halimede",
+              "type": "string"
+            },
+            {
+              "id": "working_dir_id",
+              "name": "working_dir",
+              "value": "/opt/scripts/backup-to-remote-v2",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1120, 80],
+      "id": "37ba1304-cf9e-4a23-be7d-fc272b881607",
+      "name": "Settings"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Convert rclone config to base64\nlet rcloneConfBase64 = 'REDACTED_BASE64';\nreturn [{ json: {\n  rclone_conf_base64: rcloneConfBase64,\n  rclone_conf_name_selected: $input.first().json.rclone_conf_name_selected,\n  remote_path: $input.first().json.remote_path,\n  working_dir: $input.first().json.working_dir\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1312, 80],
+      "id": "35be8e6b-0f95-45e0-b1c5-81078d00526e",
+      "name": "Parsed"
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "guildId": "DISCORD_GUILD_ID",
+        "channelId": "DISCORD_CHANNEL_ID",
+        "content": "=",
+        "options": {},
+        "embeds": [
+          {
+            "description": "=Backup Complete!\n```\n{{ $json[\"stdout\"] }}\n```"
+          }
+        ]
+      },
+      "id": "8897fffe-cb6b-40e4-82e1-d9dc63ebc8ff",
+      "name": "Discord",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [1504, 304],
+      "alwaysOutputData": true,
+      "credentials": {
+        "discordBotApi": {
+          "id": "discord-bot-cred-placeholder",
+          "name": "Discord Bot"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "authentication": "privateKey",
+        "command": "=export RCLONE_CONFIG_CONTENT=\"{{ $('Parsed').item.json.rclone_conf_base64 }}\"\nexport RCLONE_CONFIG_NAME=\"{{ $('Parsed').item.json.rclone_conf_name_selected }}\"\nexport REMOTE_PATH=\"{{ $('Parsed').item.json.remote_path }}\"\nbash backup.sh",
+        "cwd": "={{ $('Parsed').item.json.working_dir }}"
+      },
+      "id": "2ab25d96-fc75-4069-ba56-444e8219851c",
+      "name": "SSH Backup",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1120, 304],
+      "credentials": {
+        "sshPrivateKey": {
+          "id": "ssh-key-placeholder",
+          "name": "SSH Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "privateKey",
+        "command": "=export RCLONE_CONFIG_CONTENT=\"{{ $('Parsed').item.json.rclone_conf_base64 }}\"\nexport RCLONE_CONFIG_NAME=\"{{ $('Parsed').item.json.rclone_conf_name_selected }}\"\nexport REMOTE_PATH=\"{{ $('Parsed').item.json.remote_path }}\"\nbash stats.sh",
+        "cwd": "={{ $('Parsed').item.json.working_dir }}"
+      },
+      "id": "36c54dd3-dc52-4038-a659-260108cdc92e",
+      "name": "SSH Stats",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [1312, 304],
+      "credentials": {
+        "sshPrivateKey": {
+          "id": "ssh-key-placeholder",
+          "name": "SSH Key"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": { "main": [[{"node": "Settings", "type": "main", "index": 0}]] },
+    "Webhook": { "main": [[{"node": "Settings", "type": "main", "index": 0}]] },
+    "When clicking ‘Test workflow’": { "main": [[{"node": "Settings", "type": "main", "index": 0}]] },
+    "Settings": { "main": [[{"node": "Parsed", "type": "main", "index": 0}]] },
+    "Parsed": { "main": [[{"node": "SSH Backup", "type": "main", "index": 0}]] },
+    "SSH Backup": { "main": [[{"node": "SSH Stats", "type": "main", "index": 0}]] },
+    "SSH Stats": { "main": [[{"node": "Discord", "type": "main", "index": 0}]] }
+  },
+  "active": true,
+  "settings": { "executionOrder": "v1" }
+}
