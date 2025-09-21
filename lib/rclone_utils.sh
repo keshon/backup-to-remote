@@ -28,8 +28,8 @@ init_rclone() {
 
 # Verify remote exists
 verify_remote() {
-    rclone ls "${RCLONE_CONFIG_NAME}:${REMOTE_PATH}" &>/dev/null || {
-        echo "ERROR: Remote path ${RCLONE_CONFIG_NAME}:${REMOTE_PATH} is not accessible."
+    rclone mkdir "${RCLONE_CONFIG_NAME}:${REMOTE_PATH}" || {
+        echo "ERROR: Failed to create/access remote path ${RCLONE_CONFIG_NAME}:${REMOTE_PATH}."
         exit 1
     }
 }
