@@ -59,7 +59,7 @@ base64 -w0 /path/to/rclone.conf
 
 Supply it again for each manual run, or let n8n supply it as described below.
 All remotes referenced by your union must be included in that configuration.
-The script passes it through an in-memory pipe and never saves a target-side
+The script converts the ordinary INI entries to rclone environment settings and never saves a target-side
 rclone config. It does not read the old `.env` or `rclone.conf` files.
 
 ## Daily use

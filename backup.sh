@@ -31,7 +31,7 @@ Options:
 Ubuntu: missing tools are installed on first use with root or passwordless sudo.
 No services, timers, or commands are installed. Run manually or through n8n.
 Supply RCLONE_CONFIG_CONTENT (base64) per run, or paste it at the hidden prompt.
-It is passed to rclone through a pipe, never written to a config file.
+It is passed to rclone as environment settings, never written to a config file.
 EOF
 }
 

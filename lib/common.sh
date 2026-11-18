@@ -102,21 +102,40 @@ validate_sources() {
 }
 
 load_credentials() {
-    local encoded=${RCLONE_CONFIG_CONTENT:-}
+    local encoded=${RCLONE_CONFIG_CONTENT:-} decoded line section='' key value configured=false remote_section
+    remote_section=${REMOTE%%:*}
+    remote_section=${remote_section^^}
+    rclone_env=()
     if [[ -z $encoded && -t 0 ]]; then
         printf 'Paste the base64 rclone config (hidden; used only for this run): ' >&2
         IFS= read -rs encoded
         printf '\n' >&2
     fi
     [[ -n $encoded ]] || die 'Cloud credentials were not supplied. Set RCLONE_CONFIG_CONTENT for this run in n8n, or run in a terminal for a hidden prompt. Do not put credentials in backup.conf.'
-    rclone_settings=$(printf '%s' "$encoded" | base64 --decode) || die 'RCLONE_CONFIG_CONTENT is not valid base64. Encode the original rclone config again.'
-    [[ -n $rclone_settings ]] || die 'The decoded rclone config is empty.'
+    decoded=$(printf '%s' "$encoded" | base64 --decode) || die 'RCLONE_CONFIG_CONTENT is not valid base64. Encode the original rclone config again.'
+    [[ -n $decoded ]] || die 'The decoded rclone config is empty.'
+    while IFS= read -r line || [[ -n $line ]]; do
+        line=${line%$'\r'}
+        line=${line#"${line%%[![:space:]]*}"}
+        line=${line%"${line##*[![:space:]]}"}
+        [[ -n $line && $line != \#* && $line != \;* ]] || continue
+        if [[ $line =~ ^\[([a-zA-Z0-9_.-]+)\]$ ]]; then
+            section=${BASH_REMATCH[1]^^}
+        elif [[ -n $section && $line =~ ^([a-zA-Z0-9_]+)[[:space:]]*=[[:space:]]*(.*)$ ]]; then
+            key=${BASH_REMATCH[1]^^}
+            value=${BASH_REMATCH[2]}
+            rclone_env+=("RCLONE_CONFIG_${section}_${key}=$value")
+            if [[ $section == "$remote_section" && $key == TYPE ]]; then configured=true; fi
+        else
+            die 'Cloud config must be ordinary unencrypted rclone INI: [remote] sections and key = value lines. Check the original config on the backup server.'
+        fi
+    done <<< "$decoded"
+    $configured || die 'The supplied cloud config does not define the REMOTE named in backup.conf. Include the union and all of its upstream remotes.'
     unset RCLONE_CONFIG_CONTENT RCLONE_CONFIG RCLONE_PASSWORD_COMMAND
-    export -n rclone_settings
 }
 
 rclone_run() {
-    timeout --foreground "$TIMEOUT_SECONDS" rclone --config <(printf '%s\n' "$rclone_settings") "$@"
+    timeout --foreground "$TIMEOUT_SECONDS" env "${rclone_env[@]}" rclone --config /dev/null "$@"
 }
 
 show_result() {

@@ -46,6 +46,13 @@ jq -e '.apps[0].unchanged == false' "$tmp/result"
 
 real_rclone=$(command -v rclone)
 export real_rclone
+# Exercise union and hyphenated remote names with environment-only configuration.
+mkdir -p "$tmp/union-one" "$tmp/union-two"
+sed -e "s|REMOTE=.*|REMOTE=fixture-union:backups|" -e "s|STATE_DIR=.*|STATE_DIR='$tmp/union-state'|" "$tmp/config" > "$tmp/union-config"
+RCLONE_CONFIG_CONTENT=$(printf '[fixture-one]\ntype = local\n[fixture-two]\ntype = local\n[fixture-union]\ntype = union\nupstreams = fixture-one:%s/union-one fixture-two:%s/union-two\ncreate_policy = mfs\n' "$tmp" "$tmp" | base64 -w0)
+bash "$ROOT/backup.sh" --config "$tmp/union-config" --json > "$tmp/union-result"
+jq -e '.status == "success"' "$tmp/union-result"
+RCLONE_CONFIG_CONTENT=$(printf '[fixture]\ntype = local\n' | base64 -w0)
 cat > "$tmp/bin/rclone" <<'EOF'
 #!/usr/bin/env bash
 for arg in "$@"; do
