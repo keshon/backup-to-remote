@@ -1,159 +1,7 @@
 {
   "name": "Backup to Remote — archives",
-  "active": false,
   "nodes": [
     {
-      "id": "592b6ac2-c178-4178-ab8c-6b371c5e7263",
-      "name": "Wednesday 05:00",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "typeVersion": 1.4,
-      "position": [
-        0,
-        0
-      ],
-      "parameters": {
-        "rule": {
-          "interval": [
-            {
-              "field": "cronExpression",
-              "expression": "0 5 * * 3"
-            }
-          ]
-        }
-      }
-    },
-    {
-      "id": "e4228494-cf19-4fb9-81d2-de1cba7ca651",
-      "name": "Run backup",
-      "type": "n8n-nodes-base.ssh",
-      "typeVersion": 1,
-      "position": [
-        224,
-        96
-      ],
-      "parameters": {
-        "resource": "command",
-        "operation": "execute",
-        "authentication": "privateKey",
-        "command": "={{ (() => { const value = $('Settings').first().json.rcloneConfigBase64; if (typeof value !== 'string' || !/^[A-Za-z0-9+/=\\s]+$/.test(value) || !value.trim()) throw new Error('Set rcloneConfigBase64 in Settings before running.'); const config = value.replace(/\\s/g, ''); return \"RCLONE_CONFIG_CONTENT='\" + config + \"' bash /opt/scripts/backup-to-remote/backup.sh run --json\"; })() }}",
-        "cwd": "/opt/scripts/backup-to-remote"
-      }
-    },
-    {
-      "id": "386f8b8f-7a5e-421a-b780-d45af1a0a86b",
-      "name": "Validate backup result",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        448,
-        96
-      ],
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "language": "javaScript",
-        "jsCode": "const ssh = $input.first().json;\nif (ssh.code !== 0) throw new Error('Backup SSH command failed; inspect execution and target status');\nlet result;\ntry { result = JSON.parse(ssh.stdout); } catch { throw new Error('Backup returned invalid JSON'); }\nif (result.status !== 'success') throw new Error('Backup failed; inspect target status');\nreturn [{ json: result }];"
-      }
-    },
-    {
-      "id": "20dcce09-e990-4cbb-b889-a8e79ff9f03c",
-      "name": "Manual backup",
-      "type": "n8n-nodes-base.manualTrigger",
-      "typeVersion": 1,
-      "position": [
-        0,
-        192
-      ],
-      "parameters": {}
-    },
-    {
-      "name": "Read cloud space",
-      "type": "n8n-nodes-base.ssh",
-      "typeVersion": 1,
-      "position": [
-        672,
-        96
-      ],
-      "parameters": {
-        "resource": "command",
-        "operation": "execute",
-        "authentication": "privateKey",
-        "command": "={{ (() => { const value = $('Settings').first().json.rcloneConfigBase64; if (typeof value !== 'string' || !/^[A-Za-z0-9+/=\\s]+$/.test(value) || !value.trim()) throw new Error('Set rcloneConfigBase64 in Settings before running.'); const config = value.replace(/\\s/g, ''); return \"RCLONE_CONFIG_CONTENT='\" + config + \"' bash /opt/scripts/backup-to-remote/backup.sh space --json\"; })() }}",
-        "cwd": "/opt/scripts/backup-to-remote"
-      },
-      "notes": "Connect this node to the BACKUP SERVER, where rclone credentials live. It can differ from the target VPS. Capacity failure does not invalidate a completed backup.",
-      "onError": "continueRegularOutput"
-    },
-    {
-      "name": "Format backup summary",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        896,
-        96
-      ],
-      "parameters": {
-        "mode": "runOnceForAllItems",
-        "language": "javaScript",
-        "jsCode": "const result = $('Validate backup result').first().json;\nconst capacitySSH = $input.first().json;\nlet capacity;\ntry {\n  if (capacitySSH.code === 0) {\n    const parsed = JSON.parse(capacitySSH.stdout);\n    if (parsed.status === 'success') capacity = parsed;\n  }\n} catch {}\n\nif (result.status !== 'success') throw new Error('Only successful backup results can be announced');\n\nconst clean = value => String(value ?? '').replace(/[\\r\\n\\x00-\\x1f]/g, ' ').replace(/@/g, '＠').slice(0, 100);\nconst bytes = value => {\n  if (!Number.isFinite(value) || value < 0) return 'unknown';\n  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];\n  const index = Math.min(Math.floor(Math.log(Math.max(value, 1)) / Math.log(1024)), units.length - 1);\n  return (value / 1024 ** index).toFixed(index ? 1 : 0) + ' ' + units[index];\n};\nconst date = value => {\n  const parsed = new Date(value);\n  if (!Number.isFinite(parsed.getTime())) return 'unknown';\n  return parsed.toLocaleString('en-GB', { timeZone: 'Europe/Moscow', hour12: false }) + ' MSK';\n};\nconst apps = Array.isArray(result.apps) ? result.apps : [];\nconst mode = result.storage_mode || (apps.some(app => app.archive) ? 'archive' : 'restic');\nconst skipped = result.skipped === true || result.stage === 'skipped';\nconst lines = [\n  skipped ? '⏭ Backup skipped — recent backup already succeeded' : '✅ Backup complete',\n  'VPS: ' + clean(result.server_id || 'unknown'),\n  'Finished: ' + date($now.toISO()),\n];\nif (skipped) {\n  if (result.last_success_at) lines.push('Last success: ' + date(result.last_success_at * 1000));\n  lines.push('No new snapshot was created.');\n} else {\n  lines.push('Storage: ' + clean(mode));\n  lines.push('Apps: ' + apps.length);\n  const knownBytes = apps.every(app => Number.isFinite(app.data_added) && app.data_added >= 0);\n  const added = apps.reduce((total, app) => total + (Number.isFinite(app.data_added) ? app.data_added : 0), 0);\n  lines.push('New data uploaded: ' + (knownBytes ? bytes(added) : 'unknown'));\n  for (const app of apps.slice(0, 10)) {\n    const state = app.unchanged ? 'unchanged' : 'saved';\n    const snapshot = typeof app.archive === 'string' ? app.archive.slice(0, 64) : 'archive';\n    lines.push('• ' + clean(app.id).slice(0, 63) + ': ' + state + ' · ' + bytes(app.data_added) + ' · ' + snapshot);\n  }\n  if (apps.length > 10) lines.push('… ' + (apps.length - 10) + ' more apps; see the execution for details.');\n  if (Number.isFinite(result.space?.free_bytes)) lines.push('VPS free space before backup: ' + bytes(result.space.free_bytes));\n}\nif (typeof result.temporary_files_cleaned === 'boolean') {\n  lines.push('Temporary files: ' + (result.temporary_files_cleaned ? 'cleaned' : 'check required'));\n}\nif (capacity) {\n  lines.push('Cloud pool: ' + bytes(capacity.free_bytes) + ' free / ' + bytes(capacity.total_bytes) + ' total');\n  if (Number.isFinite(capacity.used_bytes)) lines.push('Cloud used: ' + bytes(capacity.used_bytes));\n} else {\n  lines.push('Cloud space: unavailable (backup result is unaffected)');\n}\nlines.push('n8n execution: ' + clean($execution.id));\nconst message = lines.join('\\n');\nconst escapeHTML = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst server = clean(result.server_id || 'unknown');\nconst title = skipped ? '⏭ Already backed up' : '✓ Backup complete';\nconst description = skipped\n  ? 'A recent backup already succeeded. No new snapshot was created.'\n  : apps.length + (apps.length === 1 ? ' app backed up' : ' apps backed up') + ' · ' + clean(mode);\nconst fields = [{ name: 'Server', value: server, inline: true }];\nconst telegram = ['<b>' + escapeHTML(title) + '</b>', '<code>' + escapeHTML(server) + '</code>', '', escapeHTML(description)];\n\nif (skipped && result.last_success_at) {\n  const lastSuccess = date(result.last_success_at * 1000);\n  fields.push({ name: 'Last successful backup', value: lastSuccess, inline: true });\n  telegram.push('', '<b>Last backup</b>  ' + escapeHTML(lastSuccess));\n}\nif (!skipped) {\n  const known = apps.every(app => Number.isFinite(app.data_added) && app.data_added >= 0);\n  const uploaded = known ? bytes(apps.reduce((total, app) => total + app.data_added, 0)) : 'unknown';\n  fields.push({ name: 'Uploaded', value: uploaded, inline: true });\n  const appLines = apps.slice(0, 7).map(app => {\n    const id = clean(app.id).slice(0, 63);\n    const snapshot = typeof app.archive === 'string' ? app.archive.slice(0, 64) : 'archive';\n    return id + ' · ' + (app.unchanged ? 'unchanged' : bytes(app.data_added)) + ' · ' + snapshot;\n  });\n  if (apps.length > 7) appLines.push('+ ' + (apps.length - 7) + ' more in the execution');\n  if (appLines.length) fields.push({ name: 'Applications', value: appLines.join('\\n'), inline: false });\n  telegram.push('', '<b>Uploaded</b>  ' + escapeHTML(uploaded));\n  if (appLines.length) telegram.push('<pre>' + escapeHTML(appLines.join('\\n')) + '</pre>');\n}\nlet cloudValue = 'Unavailable · backup result is unaffected';\nlet telegramCloud = escapeHTML(cloudValue);\nif (capacity) {\n  const free = bytes(capacity.free_bytes);\n  const total = bytes(capacity.total_bytes);\n  cloudValue = '**' + free + ' free** of ' + total;\n  telegramCloud = '<b>' + escapeHTML(free) + ' free</b> of ' + escapeHTML(total);\n  const ratioKnown = Number.isFinite(capacity.total_bytes) && capacity.total_bytes > 0\n    && Number.isFinite(capacity.free_bytes) && capacity.free_bytes >= 0\n    && capacity.free_bytes <= capacity.total_bytes;\n  if (ratioKnown) {\n    const usedRatio = 1 - capacity.free_bytes / capacity.total_bytes;\n    const filled = Math.round(usedRatio * 12);\n    const bar = '■'.repeat(filled) + '□'.repeat(12 - filled);\n    const percent = Math.round(usedRatio * 100) + '% used';\n    cloudValue += '\\n' + bar + '  ' + percent;\n    telegramCloud += '\\n<code>' + bar + '</code>  ' + percent;\n  }\n}\nfields.push({ name: 'Cloud storage · pool capacity', value: cloudValue, inline: false });\ntelegram.push('', '<b>Cloud storage</b>', telegramCloud);\nlet footer = 'VPS Backup · Run #' + clean($execution.id);\nif (result.temporary_files_cleaned === true) footer += ' · Temp files cleaned';\nif (result.temporary_files_cleaned === false) footer += ' · Check temporary files';\nconst discordEmbed = {\n  title, description, color: skipped ? 5793266 : 3066993,\n  fields, footer: { text: footer }, timestamp: $now.toISO(),\n};\ntelegram.push('', '<i>' + escapeHTML(date($now.toISO())) + ' · Run #' + escapeHTML(clean($execution.id)) + '</i>');\nconst telegramMessage = telegram.join('\\n');\nreturn [{ json: { message, telegramMessage, discordEmbed, skipped, server_id: result.server_id } }];"
-      }
-    },
-    {
-      "name": "Discord",
-      "type": "n8n-nodes-base.discord",
-      "typeVersion": 2,
-      "position": [
-        1152,
-        0
-      ],
-      "parameters": {
-        "authentication": "webhook",
-        "content": "",
-        "embeds": {
-          "values": [
-            {
-              "inputMethod": "json",
-              "json": "={{ JSON.stringify($json.discordEmbed) }}"
-            }
-          ]
-        }
-      },
-      "disabled": true,
-      "onError": "continueRegularOutput",
-      "executeOnce": true
-    },
-    {
-      "name": "Telegram",
-      "type": "n8n-nodes-base.telegram",
-      "typeVersion": 1.2,
-      "position": [
-        1152,
-        224
-      ],
-      "disabled": true,
-      "parameters": {
-        "resource": "message",
-        "operation": "sendMessage",
-        "chatId": "",
-        "text": "={{ $json.telegramMessage }}",
-        "additionalFields": {
-          "parse_mode": "HTML",
-          "appendAttribution": false,
-          "disable_web_page_preview": true
-        }
-      },
-      "notes": "Add a Telegram bot credential and chat ID, then enable this node. Disable Discord or Telegram independently.",
-      "onError": "continueRegularOutput",
-      "executeOnce": true
-    },
-    {
-      "id": "archive-settings",
-      "name": "Settings",
-      "type": "n8n-nodes-base.set",
-      "typeVersion": 3.4,
-      "position": [
-        112,
-        -128
-      ],
       "parameters": {
         "assignments": {
           "assignments": [
@@ -166,86 +14,217 @@
           ]
         },
         "options": {}
-      }
+      },
+      "id": "7a4cfb61-806b-43bb-b469-2a5bcc3e0388",
+      "name": "Settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        144,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 5 * * 3"
+            }
+          ]
+        }
+      },
+      "id": "cedaa17d-418b-4795-9620-10ebca2340e6",
+      "name": "Wednesday 05:",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -96,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "privateKey",
+        "command": "={{ (() => { const value = $('Settings').first().json.rcloneConfigBase64; if (typeof value !== 'string' || !/^[A-Za-z0-9+/=\\s]+$/.test(value) || !value.trim()) throw new Error('Set rcloneConfigBase64 in Settings before running.'); const config = value.replace(/\\s/g, ''); return \"RCLONE_CONFIG_CONTENT='\" + config + \"' bash /opt/scripts/backup-to-remote/backup.sh run --json\"; })() }}",
+        "cwd": "/opt/scripts/backup-to-remote"
+      },
+      "id": "a262d014-33bc-46c8-8d2b-5b9879ff23f0",
+      "name": "Run backup1",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        400,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ssh = $input.first().json;\nif (ssh.code !== 0) throw new Error('Backup SSH command failed; inspect execution and target status');\nlet result;\ntry { result = JSON.parse(ssh.stdout); } catch { throw new Error('Backup returned invalid JSON'); }\nif (result.status !== 'success') throw new Error('Backup failed; inspect target status');\nreturn [{ json: result }];"
+      },
+      "id": "b9863d02-489d-4452-88a2-480796b36c27",
+      "name": "Validate backup result1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "privateKey",
+        "command": "={{ (() => { const value = $('Settings').first().json.rcloneConfigBase64; if (typeof value !== 'string' || !/^[A-Za-z0-9+/=\\s]+$/.test(value) || !value.trim()) throw new Error('Set rcloneConfigBase64 in Settings before running.'); const config = value.replace(/\\s/g, ''); return \"RCLONE_CONFIG_CONTENT='\" + config + \"' bash /opt/scripts/backup-to-remote/backup.sh space --json\"; })() }}",
+        "cwd": "/opt/scripts/backup-to-remote"
+      },
+      "name": "Read cloud space1",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        848,
+        432
+      ],
+      "id": "3cfc434c-5b70-422b-85fa-ef67ec777d11",
+      "onError": "continueRegularOutput",
+      "notes": "Connect this node to the BACKUP SERVER, where rclone credentials live. It can differ from the target VPS. Capacity failure does not invalidate a completed backup."
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $('Validate backup result1').first().json;\nconst capacitySSH = $input.first().json;\nlet capacity;\ntry {\n  if (capacitySSH.code === 0) {\n    const parsed = JSON.parse(capacitySSH.stdout);\n    if (parsed.status === 'success') capacity = parsed;\n  }\n} catch {}\n\nif (result.status !== 'success') throw new Error('Only successful backup results can be announced');\n\nconst clean = value => String(value ?? '').replace(/[\\r\\n\\x00-\\x1f]/g, ' ').replace(/@/g, '＠').slice(0, 100);\nconst bytes = value => {\n  if (!Number.isFinite(value) || value < 0) return 'unknown';\n  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];\n  const index = Math.min(Math.floor(Math.log(Math.max(value, 1)) / Math.log(1024)), units.length - 1);\n  return (value / 1024 ** index).toFixed(index ? 1 : 0) + ' ' + units[index];\n};\nconst date = value => {\n  const parsed = new Date(value);\n  if (!Number.isFinite(parsed.getTime())) return 'unknown';\n  return parsed.toLocaleString('en-GB', { timeZone: 'Europe/Moscow', hour12: false }) + ' MSK';\n};\nconst apps = Array.isArray(result.apps) ? result.apps : [];\nconst mode = result.storage_mode || (apps.some(app => app.archive) ? 'archive' : 'restic');\nconst skipped = result.skipped === true || result.stage === 'skipped';\nconst lines = [\n  skipped ? '⏭ Backup skipped — recent backup already succeeded' : '✅ Backup complete',\n  'VPS: ' + clean(result.server_id || 'unknown'),\n  'Finished: ' + date($now.toISO()),\n];\nif (skipped) {\n  if (result.last_success_at) lines.push('Last success: ' + date(result.last_success_at * 1000));\n  lines.push('No new snapshot was created.');\n} else {\n  lines.push('Storage: ' + clean(mode));\n  lines.push('Apps: ' + apps.length);\n  const knownBytes = apps.every(app => Number.isFinite(app.data_added) && app.data_added >= 0);\n  const added = apps.reduce((total, app) => total + (Number.isFinite(app.data_added) ? app.data_added : 0), 0);\n  lines.push('New data uploaded: ' + (knownBytes ? bytes(added) : 'unknown'));\n  for (const app of apps.slice(0, 10)) {\n    const state = app.unchanged ? 'unchanged' : 'saved';\n    const snapshot = typeof app.archive === 'string' ? app.archive.slice(0, 64) : 'archive';\n    lines.push('• ' + clean(app.id).slice(0, 63) + ': ' + state + ' · ' + bytes(app.data_added) + ' · ' + snapshot);\n  }\n  if (apps.length > 10) lines.push('… ' + (apps.length - 10) + ' more apps; see the execution for details.');\n  if (Number.isFinite(result.space?.free_bytes)) lines.push('VPS free space before backup: ' + bytes(result.space.free_bytes));\n}\nif (typeof result.temporary_files_cleaned === 'boolean') {\n  lines.push('Temporary files: ' + (result.temporary_files_cleaned ? 'cleaned' : 'check required'));\n}\nif (capacity) {\n  lines.push('Cloud pool: ' + bytes(capacity.free_bytes) + ' free / ' + bytes(capacity.total_bytes) + ' total');\n  if (Number.isFinite(capacity.used_bytes)) lines.push('Cloud used: ' + bytes(capacity.used_bytes));\n} else {\n  lines.push('Cloud space: unavailable (backup result is unaffected)');\n}\nlines.push('n8n execution: ' + clean($execution.id));\nconst message = lines.join('\\n');\nconst escapeHTML = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst server = clean(result.server_id || 'unknown');\nconst title = skipped ? '⏭ Already backed up' : '✓ Backup complete';\nconst description = skipped\n  ? 'A recent backup already succeeded. No new snapshot was created.'\n  : apps.length + (apps.length === 1 ? ' app backed up' : ' apps backed up') + ' · ' + clean(mode);\nconst fields = [{ name: 'Server', value: server, inline: true }];\nconst telegram = ['<b>' + escapeHTML(title) + '</b>', '<code>' + escapeHTML(server) + '</code>', '', escapeHTML(description)];\n\nif (skipped && result.last_success_at) {\n  const lastSuccess = date(result.last_success_at * 1000);\n  fields.push({ name: 'Last successful backup', value: lastSuccess, inline: true });\n  telegram.push('', '<b>Last backup</b>  ' + escapeHTML(lastSuccess));\n}\nif (!skipped) {\n  const known = apps.every(app => Number.isFinite(app.data_added) && app.data_added >= 0);\n  const uploaded = known ? bytes(apps.reduce((total, app) => total + app.data_added, 0)) : 'unknown';\n  fields.push({ name: 'Uploaded', value: uploaded, inline: true });\n  const appLines = apps.slice(0, 7).map(app => {\n    const id = clean(app.id).slice(0, 63);\n    const snapshot = typeof app.archive === 'string' ? app.archive.slice(0, 64) : 'archive';\n    return id + ' · ' + (app.unchanged ? 'unchanged' : bytes(app.data_added)) + ' · ' + snapshot;\n  });\n  if (apps.length > 7) appLines.push('+ ' + (apps.length - 7) + ' more in the execution');\n  if (appLines.length) fields.push({ name: 'Applications', value: appLines.join('\\n'), inline: false });\n  telegram.push('', '<b>Uploaded</b>  ' + escapeHTML(uploaded));\n  if (appLines.length) telegram.push('<pre>' + escapeHTML(appLines.join('\\n')) + '</pre>');\n}\nlet cloudValue = 'Unavailable · backup result is unaffected';\nlet telegramCloud = escapeHTML(cloudValue);\nif (capacity) {\n  const free = bytes(capacity.free_bytes);\n  const total = bytes(capacity.total_bytes);\n  cloudValue = '**' + free + ' free** of ' + total;\n  telegramCloud = '<b>' + escapeHTML(free) + ' free</b> of ' + escapeHTML(total);\n  const ratioKnown = Number.isFinite(capacity.total_bytes) && capacity.total_bytes > 0\n    && Number.isFinite(capacity.free_bytes) && capacity.free_bytes >= 0\n    && capacity.free_bytes <= capacity.total_bytes;\n  if (ratioKnown) {\n    const usedRatio = 1 - capacity.free_bytes / capacity.total_bytes;\n    const filled = Math.round(usedRatio * 12);\n    const bar = '■'.repeat(filled) + '□'.repeat(12 - filled);\n    const percent = Math.round(usedRatio * 100) + '% used';\n    cloudValue += '\\n' + bar + '  ' + percent;\n    telegramCloud += '\\n<code>' + bar + '</code>  ' + percent;\n  }\n}\nfields.push({ name: 'Cloud storage · pool capacity', value: cloudValue, inline: false });\ntelegram.push('', '<b>Cloud storage</b>', telegramCloud);\nlet footer = 'VPS Backup · Run #' + clean($execution.id);\nif (result.temporary_files_cleaned === true) footer += ' · Temp files cleaned';\nif (result.temporary_files_cleaned === false) footer += ' · Check temporary files';\nconst discordEmbed = {\n  title, description, color: skipped ? 5793266 : 3066993,\n  fields, footer: { text: footer }, timestamp: $now.toISO(),\n};\ntelegram.push('', '<i>' + escapeHTML(date($now.toISO())) + ' · Run #' + escapeHTML(clean($execution.id)) + '</i>');\nconst telegramMessage = telegram.join('\\n');\nreturn [{ json: { message, telegramMessage, discordEmbed, skipped, server_id: result.server_id } }];"
+      },
+      "name": "Format backup summary1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        432
+      ],
+      "id": "bf568419-e64b-4d38-a096-50d00050e8e8"
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "options": {},
+        "embeds": {
+          "values": [
+            {
+              "inputMethod": "json",
+              "json": "={{ JSON.stringify($json.discordEmbed) }}"
+            }
+          ]
+        }
+      },
+      "name": "Discord1",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        1504,
+        256
+      ],
+      "executeOnce": true,
+      "id": "55b6bed6-c39a-4e55-a247-a954c1f3ffc8",
+      "webhookId": "ec2d66bb-a643-4fc1-90f8-10f6f0aa1d2d",
+      "credentials": {
+        "discordWebhookApi": {
+          "id": "A2fYRiSt6H5rDzlJ",
+          "name": "Ctrl+Z Webhook account"
+        }
+      },
+      "disabled": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "text": "={{ $json.telegramMessage }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true,
+          "parse_mode": "HTML"
+        }
+      },
+      "name": "Telegram1",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1504,
+        544
+      ],
+      "executeOnce": true,
+      "id": "94d9d03e-f6a7-4a51-a9f0-0d04ea9c4f6d",
+      "webhookId": "129469c8-04b0-4d83-a9aa-8b9cc1ae73bf",
+      "disabled": true,
+      "onError": "continueRegularOutput",
+      "notes": "Add a Telegram bot credential and chat ID, then enable this node. Disable Discord or Telegram independently."
     }
   ],
+  "pinData": {},
   "connections": {
-    "Wednesday 05:00": {
-      "main": [
-        [
-          {
-            "node": "Settings",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Run backup": {
-      "main": [
-        [
-          {
-            "node": "Validate backup result",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Manual backup": {
-      "main": [
-        [
-          {
-            "node": "Settings",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Validate backup result": {
-      "main": [
-        [
-          {
-            "node": "Read cloud space",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Read cloud space": {
-      "main": [
-        [
-          {
-            "node": "Format backup summary",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Format backup summary": {
-      "main": [
-        [
-          {
-            "node": "Discord",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Telegram",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Settings": {
       "main": [
         [
           {
-            "node": "Run backup",
+            "node": "Run backup1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wednesday 05:": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run backup1": {
+      "main": [
+        [
+          {
+            "node": "Validate backup result1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate backup result1": {
+      "main": [
+        [
+          {
+            "node": "Read cloud space1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read cloud space1": {
+      "main": [
+        [
+          {
+            "node": "Format backup summary1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format backup summary1": {
+      "main": [
+        [
+          {
+            "node": "Discord1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Telegram1",
             "type": "main",
             "index": 0
           }
@@ -253,21 +232,29 @@
       ]
     }
   },
+  "active": false,
   "settings": {
-    "timezone": "Europe/Moscow",
     "executionOrder": "v1",
-    "executionTimeout": 3600
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "a5b16be6-950a-47cb-b1ce-8782f672be54",
+  "meta": {
+    "instanceId": "cda3fdb6a93635fde4dcacb4b03f5ac0acfa1553758858ab1532d39fa45bb06e"
   },
   "nodeGroups": [
     {
-      "name": "Complete backup",
-      "description": "Backs up the selected VPS, checks success and prepares a summary with cloud capacity.",
-      "nodeNames": [
-        "Run backup",
-        "Validate backup result",
-        "Read cloud space",
-        "Format backup summary"
-      ]
+      "id": "9893f4e4-3423-4126-8ee2-a951b0e388c9",
+      "nodeIds": [
+        "a262d014-33bc-46c8-8d2b-5b9879ff23f0",
+        "b9863d02-489d-4452-88a2-480796b36c27",
+        "3cfc434c-5b70-422b-85fa-ef67ec777d11",
+        "bf568419-e64b-4d38-a096-50d00050e8e8"
+      ],
+      "name": "Complete backup 1",
+      "description": "Backs up the selected VPS, checks success and prepares a summary with cloud capacity."
     }
-  ]
+  ],
+  "id": "2FpOkCl1RNngNRmH",
+  "tags": []
 }
