@@ -22,7 +22,9 @@ bootstrap() {
     [[ ${ID:-} == ubuntu ]] || die 'Automatic dependency installation supports Ubuntu. Install jq rclone tar gzip coreutils util-linux manually.'
     local -a elevate=()
     if ((EUID != 0)); then
-        command -v sudo >/dev/null && sudo -n true 2>/dev/null || die 'Missing tools need installation. Run this command once with sudo, preserving RCLONE_CONFIG_CONTENT if supplied.'
+        if ! command -v sudo >/dev/null || ! sudo -n true 2>/dev/null; then
+            die 'Missing tools need installation. Run this command once with sudo, preserving RCLONE_CONFIG_CONTENT if supplied.'
+        fi
         elevate=(sudo -n)
     fi
     log "Installing missing tools: ${packages[*]}"
@@ -44,7 +46,9 @@ app() {
     APP_STOPS[$id]=''
     APP_EXCLUDES[$id]=''
     while (($#)); do
-        (($# >= 2)) && [[ -n $2 && $2 != *$'\n'* ]] || die "App $id: $1 needs a value on the same line."
+        if (($# < 2)) || [[ -z $2 || $2 == *$'\n'* ]]; then
+            die "App $id: $1 needs a value on the same line."
+        fi
         case $1 in
             --stop)
                 [[ $2 =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]] || die "App $id: invalid container name."

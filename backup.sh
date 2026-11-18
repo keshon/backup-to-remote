@@ -43,7 +43,9 @@ if (($#)) && [[ $1 != -* ]]; then command=$1; shift; fi
 while (($#)); do
     case $1 in
         --config)
-            (($# >= 2)) && [[ -n $2 && $2 != --* ]] || die '--config needs a filename. Example: --config /opt/scripts/backup-to-remote/backup.conf'
+            if (($# < 2)) || [[ -z $2 || $2 == --* ]]; then
+                die '--config needs a filename. Example: --config /opt/scripts/backup-to-remote/backup.conf'
+            fi
             config=$2; shift 2 ;;
         --json) json=true; shift ;;
         --force) force=true; shift ;;

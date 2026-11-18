@@ -185,7 +185,7 @@ Cloud archives are unaffected.
 Run on Ubuntu with jq, rclone, shellcheck and Node.js installed:
 
 ```bash
-shellcheck backup.sh stats.sh lib/*.sh tests/backup.sh
+shellcheck -x backup.sh stats.sh tests/backup.sh
 bash tests/backup.sh
 node --test tests/test_notifications.cjs
 ```

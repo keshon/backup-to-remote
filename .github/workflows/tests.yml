@@ -14,7 +14,7 @@ jobs:
           bash -n backup.sh
           bash -n lib/common.sh
           bash -n lib/backup.sh
-          shellcheck backup.sh stats.sh lib/*.sh tests/backup.sh
+          shellcheck -x backup.sh stats.sh tests/backup.sh
           bash backup.sh --help
           if bash backup.sh --config; then exit 1; fi
       - name: Backup and recovery with a real local rclone remote
