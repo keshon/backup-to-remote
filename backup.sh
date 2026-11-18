@@ -26,12 +26,15 @@ Options:
   --config FILE                      Settings (default: backup.conf beside script)
   --json                             JSON on stdout; progress on stderr
   --force                            Save even if the folder is unchanged
-  --skip-hash-check                    Check uploaded size instead of downloading it
-  --allow-live-changes               Accept files changing during archive creation
+  --skip-hash-check                   Check uploaded size instead of downloading it
+  --allow-live-changes                Accept files changing during archive creation
   --help                             Show this guide
 
 Ubuntu: missing tools are installed on first use with root or passwordless sudo.
 No services, timers, or commands are installed. Run manually or through n8n.
+Both skip options can also be set per app in backup.conf:
+  app website /opt/dockers/website --skip-hash-check --allow-live-changes
+Command-line options apply to every app.
 Supply RCLONE_CONFIG_CONTENT (base64) per run, or paste it at the hidden prompt.
 It is passed to rclone as environment settings, never written to a config file.
 EOF
@@ -83,6 +86,16 @@ if [[ $command == plan ]]; then
     for id in "${APP_IDS[@]}"; do
         printf '\n%s: %s\n' "$id" "${APP_PATHS[$id]}"
         if [[ -n ${APP_STOPS[$id]} ]]; then printf '  Briefly stop: %s\n' "${APP_STOPS[$id]//$'\n'/, }"; else printf '  Copy live files (use --stop for databases and WAL stores).\n'; fi
+        if $skip_hash_check || ${APP_SKIP_HASH_CHECK[$id]}; then
+            printf '  Upload verification: remote size only.\n'
+        else
+            printf '  Upload verification: full SHA-256 readback.\n'
+        fi
+        if $allow_live_changes || ${APP_ALLOW_LIVE_CHANGES[$id]}; then
+            printf '  Changing files: accepted (best-effort archive).\n'
+        else
+            printf '  Changing files: reject the archive.\n'
+        fi
     done
     printf '\nNo files uploaded or containers stopped. Keep %s archives per app.\n' "$KEEP"
     exit 0

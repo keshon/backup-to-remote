@@ -111,6 +111,24 @@ jq -e '.status == "success" and .apps[0].unchanged' "$tmp/result"
     expect_failure
 )
 
+# Per-app hash opt-out must not weaken the next app; CLI opts out for all apps.
+sed '/^app /s/$/ --skip-hash-check/' "$tmp/config" > "$tmp/mixed-config"
+printf "app strict '%s/source space'\n" "$tmp" >> "$tmp/mixed-config"
+export FAIL_READBACK=1
+if bash "$ROOT/backup.sh" --force --config "$tmp/mixed-config" --json > "$tmp/result"; then
+    echo 'Per-app hash option leaked into strict app' >&2; exit 1
+fi
+jq -e '.status == "failed" and .failed_app == "strict" and (.apps | length) == 1 and .apps[0].verification == "remote-size"' "$tmp/result"
+bash "$ROOT/backup.sh" --force --config "$tmp/mixed-config" --json --skip-hash-check > "$tmp/result"
+jq -e '.status == "success" and (.apps | all(.verification == "remote-size"))' "$tmp/result"
+unset FAIL_READBACK
+# Boolean flags may be interleaved with value options; missing values stay errors.
+cp "$tmp/config" "$tmp/bad-config"
+printf "app invalid '%s/source space' --stop --skip-hash-check\n" "$tmp" >> "$tmp/bad-config"
+if bash "$ROOT/backup.sh" plan --config "$tmp/bad-config"; then
+    echo 'Missing container name should fail' >&2; exit 1
+fi
+
 # Model Docker state and a failed restart without stopping real applications.
 export DOCKER_STATE="$tmp/docker-state"
 printf 'true\n' > "$DOCKER_STATE"
@@ -160,8 +178,12 @@ if bash "$ROOT/backup.sh" --force --config "$tmp/config" --json > "$tmp/result";
 fi
 printf '0\n' > "$TAR_CALLS"
 export TAR_CHANGED_EXIT=1
-bash "$ROOT/backup.sh" --force --config "$tmp/config" --json --allow-live-changes > "$tmp/result"
-jq -e '.status == "success"' "$tmp/result"
+sed -e '/^app last-run /d' -e '/^app /s/$/ --allow-live-changes --skip-hash-check --exclude never-matches/' "$tmp/config" > "$tmp/live-config"
+bash "$ROOT/backup.sh" plan --config "$tmp/live-config" > "$tmp/plan"
+grep -q 'remote size only' "$tmp/plan"
+grep -q 'best-effort archive' "$tmp/plan"
+bash "$ROOT/backup.sh" --force --config "$tmp/live-config" --json > "$tmp/result"
+jq -e '.status == "success" and .apps[0].verification == "remote-size"' "$tmp/result"
 # Saved fingerprint must describe the archive rather than the initial scan.
 name=$(jq -r '.apps[0].archive' "$tmp/result")
 expected=$(gzip -dc "$dest/$name" | sha256sum | cut -d ' ' -f 1)

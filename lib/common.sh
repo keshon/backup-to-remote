@@ -33,7 +33,7 @@ bootstrap() {
 }
 
 declare -a APP_IDS=()
-declare -A APP_PATHS=() APP_STOPS=() APP_EXCLUDES=()
+declare -A APP_PATHS=() APP_STOPS=() APP_EXCLUDES=() APP_SKIP_HASH_CHECK=() APP_ALLOW_LIVE_CHANGES=()
 
 app() {
     (($# >= 2)) || die 'An app needs a name and a folder. Example: app melodix /opt/dockers/melodix --stop melodix-app-1'
@@ -45,8 +45,16 @@ app() {
     APP_PATHS[$id]=$path
     APP_STOPS[$id]=''
     APP_EXCLUDES[$id]=''
+    APP_SKIP_HASH_CHECK[$id]=false
+    APP_ALLOW_LIVE_CHANGES[$id]=false
     while (($#)); do
-        if (($# < 2)) || [[ -z $2 || $2 == *$'\n'* ]]; then
+        case $1 in
+            --skip-hash-check) APP_SKIP_HASH_CHECK[$id]=true; shift; continue ;;
+            --allow-live-changes) APP_ALLOW_LIVE_CHANGES[$id]=true; shift; continue ;;
+            --stop|--exclude) ;;
+            *) die "App $id: unknown option $1. Use --stop CONTAINER, --exclude PATTERN, --skip-hash-check, or --allow-live-changes." ;;
+        esac
+        if (($# < 2)) || [[ -z $2 || $2 == --* || $2 == *$'\n'* ]]; then
             die "App $id: $1 needs a value on the same line."
         fi
         case $1 in
@@ -54,7 +62,6 @@ app() {
                 [[ $2 =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$ ]] || die "App $id: invalid container name."
                 APP_STOPS[$id]+="$2"$'\n' ;;
             --exclude) APP_EXCLUDES[$id]+="$2"$'\n' ;;
-            *) die "App $id: unknown option $1. Use --stop CONTAINER or --exclude PATTERN." ;;
         esac
         shift 2
     done

@@ -85,6 +85,9 @@ prune_app() {
 
 backup_app() {
     local id=$1 fingerprint previous='' saved='' remote name archive packed_hash remote_hash stream_hash bytes verification
+    local skip_hash_check=$skip_hash_check allow_live_changes=$allow_live_changes
+    if ${APP_SKIP_HASH_CHECK[$id]}; then skip_hash_check=true; fi
+    if ${APP_ALLOW_LIVE_CHANGES[$id]}; then allow_live_changes=true; fi
     remote="$REMOTE/$SERVER_ID/$id"
     log "$id: checking for changes."
     stop_containers "$id"

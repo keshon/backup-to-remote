@@ -105,8 +105,20 @@ not fully verified. `--allow-live-changes` accepts a mismatch between the initia
 scan and archived content, and GNU tar warnings about changing files. Other tar
 errors still fail. This is a best-effort copy: live databases may be inconsistent.
 Configured `--stop` containers still stop; this flag does not override them.
-Both flags can be combined. For n8n, append them after `run --json` in the
-**Run backup** command. Defaults keep both checks enabled.
+Set these options on each app that needs them:
+
+```bash
+app website /opt/dockers/keshon.ru --skip-hash-check --allow-live-changes
+app database /opt/dockers/database --stop database-db-1
+```
+
+Here only `website` skips the hash check and accepts changing files. `database`
+keeps both checks enabled. Flags can appear before or after `--stop` and
+`--exclude`. `plan` shows the effective checks for each app. n8n uses the same
+settings without changing its command.
+
+Command-line flags still apply to **every app** for that run and override app
+defaults. Defaults keep both checks enabled.
 
 Each upload is downloaded through rclone and SHA-256 checked before the script
 records success. This doubles archive transfer traffic. Only then does it apply
