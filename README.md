@@ -1,5 +1,7 @@
 # Backup to Remote
 
+![Folders on a VPS become compressed archives uploaded to cloud storage](assets/readme-header.png)
+
 Bash scripts for backing up Ubuntu VPS folders to rclone storage, including a
 union of cloud accounts. Each changed app gets a complete `.tar.gz` archive.
 Download it and unpack it with tar or 7-Zip.
