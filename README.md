@@ -118,7 +118,7 @@ container stops. `plan` shows the effective checks per app.
 | `RESERVE_MIB` | `512` | Free-space reserve in MiB. Must be a positive integer. |
 | `TIMEOUT_SECONDS` | `14400` (4 hours) | Timeout per rclone command, not for the whole backup. Must be a positive integer. |
 | `RCLONE_CONFIG_CONTENT` | Unset; hidden prompt in a terminal | Base64 rclone INI supplied through the environment. Required for unattended cloud operations. |
-| Compression | ON; gzip level 6 | All archives are `.tar.gz`. There is no compression switch. |
+| Compression | ON; gzip level 1 (fast) | All archives are `.tar.gz`. There is no compression switch. |
 
 ## How backups work
 

@@ -159,7 +159,7 @@ backup_app() {
         limit=$(((limit - RESERVE_MIB * 1048576) / 1024))
         ((limit > 0)) || die "App $id: no space remains above the configured reserve."
         ulimit -f "$limit"
-        tar_app "$id" | gzip -n > "$archive"
+        tar_app "$id" | gzip -1 -n > "$archive"
     )
     stream_hash=$(gzip -dc -- "$archive" | digest)
     if [[ $stream_hash != "$fingerprint" ]]; then
