@@ -84,11 +84,12 @@ backup_app() {
         saved=$(jq -er '.archive' "$STATE_DIR/$id.json")
     fi
     if ! $force && [[ $fingerprint == "$previous" ]]; then
+        recover_containers
         rclone_run lsjson "$remote/$saved" --stat > "$work/remote-stat.json"
         [[ $(jq -er '.Size' "$work/remote-stat.json") == "$(jq -er '.bytes' "$STATE_DIR/$id.json")" ]] || die "App $id: the last remote archive has a different size. Run again with --force after checking cloud storage."
         log "$id: unchanged; last remote archive is present."
-        recover_containers
         record_app "$id" "$saved" 0 true
+        prune_app "$remote" "$saved"
         return
     fi
     check_space "$id"

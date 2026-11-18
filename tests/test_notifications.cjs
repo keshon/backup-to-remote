@@ -20,13 +20,13 @@ function report(result, capacity = { code: 0, stdout: JSON.stringify({ status: '
 
 const saved = {
   status: 'success', server_id: 'my-vps', temporary_files_cleaned: true,
-  apps: [{ id: 'melodix', snapshot_id: 'a'.repeat(64), data_added: 2048 }],
+  apps: [{ id: 'melodix', archive: '20261118T050000Z-a1B2c3D4.tar.gz', data_added: 2048 }],
 };
 
-test('completion report includes app, snapshot, uploaded bytes and pool capacity', () => {
+test('completion report includes app, archive, uploaded bytes and pool capacity', () => {
   const output = report(saved);
   assert.match(output.message, /Backup complete/);
-  assert.match(output.message, /melodix: saved.*2.0 KiB.*aaaaaaaa/);
+  assert.match(output.message, /melodix: saved.*2.0 KiB.*20261118T050000Z-a1B2c3D4.tar.gz/);
   assert.match(output.message, /59.0 GiB free \/ 80.0 GiB total/);
   assert.match(output.message, /Temporary files: cleaned/);
   assert.doesNotMatch(output.message, /password|repository|stdout/);
@@ -87,11 +87,18 @@ test('Discord embed groups status, apps and capacity within platform limits', ()
   assert.match(skipped.discordEmbed.title, /Already backed up/);
   assert.match(skipped.discordEmbed.description, /No new snapshot/);
   const cloud = completed.discordEmbed.fields.find(field => field.name.startsWith('Cloud storage'));
-  assert.match(cloud.value, /[в– в–Ў]{12}/);
+  assert.match(cloud.value, /[■□]{12}/);
   assert.match(cloud.value, /26% used/);
   const large = report({ ...saved, apps: Array.from({ length: 100 }, () => ({ ...saved.apps[0], id: 'a'.repeat(63) })) });
   assert.ok(large.discordEmbed.fields.every(field => field.value.length <= 1024));
   assert.ok(large.telegramMessage.length <= 4096);
   assert.match(large.telegramMessage, /<b>.*Backup complete/);
-  assert.ok(!report(saved, { code: 1 }).discordEmbed.fields.at(-1).value.includes('в– '));
+  assert.ok(!report(saved, { code: 1 }).discordEmbed.fields.at(-1).value.includes('■'));
+});
+
+test('archive embed keeps readable glyphs and the downloadable filename', () => {
+  const output = report(saved);
+  assert.match(output.discordEmbed.title, /✅|✓/);
+  assert.ok(output.discordEmbed.fields.find(f => f.name === 'Applications').value.includes(saved.apps[0].archive));
+  assert.doesNotMatch(output.discordEmbed.fields.find(f => f.name === 'Applications').value, /unknown/);
 });

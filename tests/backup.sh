@@ -51,6 +51,11 @@ cat > "$tmp/bin/rclone" <<'EOF'
 for arg in "$@"; do
     if [[ $arg == copyto && ${FAIL_UPLOAD:-} == 1 ]]; then echo 'simulated upload failure' >&2; exit 9; fi
     if [[ $arg == cat && ${FAIL_READBACK:-} == 1 ]]; then echo 'wrong bytes'; exit 0; fi
+    if [[ $arg == deletefile && ${FAIL_PRUNE:-} == 1 ]]; then echo 'simulated retention failure' >&2; exit 9; fi
+    if [[ $arg == lsjson && ${CHECK_RUNNING:-} == 1 && $(cat "$DOCKER_STATE") != true ]]; then
+        echo 'container was still stopped during cloud access' >&2
+        exit 8
+    fi
 done
 exec "$real_rclone" "$@"
 EOF
@@ -71,6 +76,14 @@ assert_clean
 unset FAIL_READBACK
 run
 jq -e '.status == "success" and (.apps[0].unchanged | not)' "$tmp/result"
+[[ $(find "$dest" -name '*.tar.gz.sha256' | wc -l) -eq 2 ]]
+printf 'third version\n' > "$tmp/source space/file"
+export FAIL_PRUNE=1
+expect_failure
+[[ $(find "$dest" -name '*.tar.gz.sha256' | wc -l) -eq 3 ]]
+unset FAIL_PRUNE
+run
+jq -e '.status == "success" and .apps[0].unchanged' "$tmp/result"
 [[ $(find "$dest" -name '*.tar.gz.sha256' | wc -l) -eq 2 ]]
 (
     exec 8>"$tmp/state/run.lock"
@@ -99,6 +112,9 @@ jq -e '.status == "failed" and (.error | contains("restart"))' "$tmp/result"
 unset FAIL_START
 run
 [[ $(cat "$DOCKER_STATE") == true && ! -e $tmp/state/stopped-containers ]]
+export CHECK_RUNNING=1
+run
+unset CHECK_RUNNING
 printf 'false\n' > "$DOCKER_STATE"
 run
 [[ $(cat "$DOCKER_STATE") == false ]]
