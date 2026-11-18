@@ -29,15 +29,25 @@ stop_containers() {
 }
 
 tar_app() {
-    local id=$1 pattern
+    local id=$1 pattern code
     local -a excludes=()
     while IFS= read -r pattern; do
         [[ -n $pattern ]] && excludes+=(--exclude="$pattern")
     done <<< "${APP_EXCLUDES[$id]}"
     # Stable headers allow the archive stream to serve as the change fingerprint.
-    tar --sort=name --format=pax --numeric-owner --acls --xattrs \
+    if tar --sort=name --format=pax --numeric-owner --acls --xattrs \
         --pax-option='exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime' \
-        "${excludes[@]}" -C "${APP_PATHS[$id]}" -cf - .
+        "${excludes[@]}" -C "${APP_PATHS[$id]}" -cf - .; then
+        return 0
+    else
+        code=$?
+    fi
+    # GNU tar exit 1 means files changed; exit 2 still signals a fatal error.
+    if $allow_live_changes && ((code == 1)); then
+        log "$id: accepting changes reported by tar (--allow-live-changes)."
+        return 0
+    fi
+    return "$code"
 }
 
 digest() { sha256sum | cut -d ' ' -f 1; }
@@ -51,9 +61,9 @@ check_space() {
 }
 
 record_app() {
-    local id=$1 archive=$2 bytes=$3 unchanged=$4
-    results=$(jq -c --arg id "$id" --arg archive "$archive" --argjson bytes "$bytes" --argjson unchanged "$unchanged" \
-        '. + [{id:$id,archive:$archive,data_added:$bytes,unchanged:$unchanged,status:"success",verification:"download-sha256"}]' <<< "$results")
+    local id=$1 archive=$2 bytes=$3 unchanged=$4 verification=${5:-previous-archive-size}
+    results=$(jq -c --arg id "$id" --arg archive "$archive" --argjson bytes "$bytes" --argjson unchanged "$unchanged" --arg verification "$verification" \
+        '. + [{id:$id,archive:$archive,data_added:$bytes,unchanged:$unchanged,status:"success",verification:$verification}]' <<< "$results")
 }
 
 prune_app() {
@@ -74,7 +84,7 @@ prune_app() {
 }
 
 backup_app() {
-    local id=$1 fingerprint previous='' saved='' remote name archive packed_hash remote_hash stream_hash bytes
+    local id=$1 fingerprint previous='' saved='' remote name archive packed_hash remote_hash stream_hash bytes verification
     remote="$REMOTE/$SERVER_ID/$id"
     log "$id: checking for changes."
     stop_containers "$id"
@@ -105,20 +115,33 @@ backup_app() {
         tar_app "$id" | gzip -n > "$archive"
     )
     stream_hash=$(gzip -dc -- "$archive" | digest)
-    [[ $stream_hash == "$fingerprint" ]] || die "App $id changed while archiving. No success was recorded. Configure --stop for its writer containers, then retry."
+    if [[ $stream_hash != "$fingerprint" ]]; then
+        $allow_live_changes || die "App $id changed while archiving. Configure --stop for writer containers, or use --allow-live-changes for a best-effort live archive."
+        log "$id: accepting a live archive; files changed during preparation."
+    fi
+    # Remember the stream we actually archived, not the earlier source scan.
+    fingerprint=$stream_hash
     recover_containers
     bytes=$(stat -c %s -- "$archive")
     packed_hash=$(digest < "$archive")
     log "$id: uploading $name ($bytes bytes); containers have restarted."
     rclone_run copyto "$archive" "$remote/$name"
-    log "$id: reading the uploaded archive back to verify SHA-256."
-    remote_hash=$(rclone_run cat "$remote/$name" | digest)
-    [[ $remote_hash == "$packed_hash" ]] || die "App $id: uploaded bytes did not match. Local success state was not updated; retry after checking cloud access."
+    verification=download-sha256
+    if $skip_hash_check; then
+        log "$id: checking uploaded size; full readback skipped."
+        rclone_run lsjson "$remote/$name" --stat > "$work/remote-stat.json"
+        [[ $(jq -er '.Size' "$work/remote-stat.json") == "$bytes" ]] || die "App $id: uploaded size did not match. Local success state was not updated."
+        verification=remote-size
+    else
+        log "$id: reading the uploaded archive back to verify SHA-256."
+        remote_hash=$(rclone_run cat "$remote/$name" | digest)
+        [[ $remote_hash == "$packed_hash" ]] || die "App $id: uploaded bytes did not match. Local success state was not updated; retry after checking cloud access."
+    fi
     printf '%s  %s\n' "$packed_hash" "$name" | rclone_run rcat "$remote/$name.sha256"
     jq -n --arg fingerprint "$fingerprint" --arg archive "$name" --argjson bytes "$bytes" \
         '{fingerprint:$fingerprint,archive:$archive,bytes:$bytes}' > "$work/state.json"
     mv -- "$work/state.json" "$STATE_DIR/apps/$id.json"
-    record_app "$id" "$name" "$bytes" false
+    record_app "$id" "$name" "$bytes" false "$verification"
     prune_app "$remote" "$name"
     rm -- "$archive"
 }

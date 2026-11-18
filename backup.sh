@@ -26,6 +26,8 @@ Options:
   --config FILE                      Settings (default: backup.conf beside script)
   --json                             JSON on stdout; progress on stderr
   --force                            Save even if the folder is unchanged
+  --skip-hash-check                    Check uploaded size instead of downloading it
+  --allow-live-changes               Accept files changing during archive creation
   --help                             Show this guide
 
 Ubuntu: missing tools are installed on first use with root or passwordless sudo.
@@ -39,6 +41,8 @@ command=run
 config="$SCRIPT_DIR/backup.conf"
 json=false
 force=false
+skip_hash_check=false
+allow_live_changes=false
 if (($#)) && [[ $1 != -* ]]; then command=$1; shift; fi
 while (($#)); do
     case $1 in
@@ -49,6 +53,8 @@ while (($#)); do
             config=$2; shift 2 ;;
         --json) json=true; shift ;;
         --force) force=true; shift ;;
+        --skip-hash-check) skip_hash_check=true; shift ;;
+        --allow-live-changes) allow_live_changes=true; shift ;;
         --help|-h) usage; exit 0 ;;
         *) die "Unknown option: $1. Run: bash backup.sh --help" ;;
     esac

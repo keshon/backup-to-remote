@@ -80,9 +80,12 @@ export FAIL_READBACK=1
 expect_failure
 [[ $(sha256sum "$tmp/state/apps/my-app.json") == "$before" ]]
 assert_clean
+# The opt-out must not call cat, and must report its weaker verification.
+bash "$ROOT/backup.sh" --config "$tmp/config" --json --skip-hash-check > "$tmp/result"
+jq -e '.status == "success" and .apps[0].verification == "remote-size"' "$tmp/result"
 unset FAIL_READBACK
 run
-jq -e '.status == "success" and (.apps[0].unchanged | not)' "$tmp/result"
+jq -e '.status == "success" and .apps[0].unchanged' "$tmp/result"
 [[ $(find "$dest" -name '*.tar.gz.sha256' | wc -l) -eq 2 ]]
 cp "$tmp/config" "$tmp/no-space-config"
 printf 'RESERVE_MIB=999999999\n' >> "$tmp/no-space-config"
@@ -135,12 +138,44 @@ unset CHECK_RUNNING
 printf 'false\n' > "$DOCKER_STATE"
 run
 [[ $(cat "$DOCKER_STATE") == false ]]
+# Change the source after the first tar scan, before compression starts.
+export REAL_TAR
+REAL_TAR=$(command -v tar)
+export TAR_CALLS="$tmp/tar-calls" LIVE_FILE="$tmp/source space/file"
+printf '0\n' > "$TAR_CALLS"
 cat > "$tmp/bin/tar" <<'EOF'
 #!/usr/bin/env bash
-echo 'simulated unreadable source' >&2
+calls=$(cat "$TAR_CALLS")
+calls=$((calls + 1))
+printf '%s\n' "$calls" > "$TAR_CALLS"
+"$REAL_TAR" "$@"
+code=$?
+if ((calls == 1)); then printf 'live change\n' >> "$LIVE_FILE"; fi
+if [[ ${TAR_CHANGED_EXIT:-} == 1 && $code == 0 ]]; then exit 1; fi
+exit "$code"
+EOF
+chmod +x "$tmp/bin/tar"
+if bash "$ROOT/backup.sh" --force --config "$tmp/config" --json > "$tmp/result"; then
+    echo 'Expected live change rejection' >&2; exit 1
+fi
+printf '0\n' > "$TAR_CALLS"
+export TAR_CHANGED_EXIT=1
+bash "$ROOT/backup.sh" --force --config "$tmp/config" --json --allow-live-changes > "$tmp/result"
+jq -e '.status == "success"' "$tmp/result"
+# Saved fingerprint must describe the archive rather than the initial scan.
+name=$(jq -r '.apps[0].archive' "$tmp/result")
+expected=$(gzip -dc "$dest/$name" | sha256sum | cut -d ' ' -f 1)
+[[ $(jq -r '.fingerprint' "$tmp/state/apps/my-app.json") == "$expected" ]]
+unset TAR_CHANGED_EXIT
+cat > "$tmp/bin/tar" <<'EOF'
+#!/usr/bin/env bash
+echo 'simulated unreadable source'  >&2
 exit 2
 EOF
 chmod +x "$tmp/bin/tar"
 expect_failure
+if bash "$ROOT/backup.sh" --config "$tmp/config" --json --allow-live-changes > "$tmp/result"; then
+    echo 'Fatal tar errors must not be ignored' >&2; exit 1
+fi
 assert_clean
 printf '\nArchive, restore, deduplication, retention, failure, lock and restart tests passed.\n'

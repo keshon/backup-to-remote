@@ -5,6 +5,12 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const workflow = JSON.parse(fs.readFileSync(path.join(__dirname, '../n8n/n8n_workflow_example.json'), 'utf8'));
+// n8n adds numeric suffixes when nodes are copied into an existing workflow.
+for (const node of workflow.nodes) node.name = node.name.replace(/\d+$/, '');
+workflow.connections = Object.fromEntries(Object.entries(workflow.connections).map(([name, outputs]) => {
+  for (const branch of outputs.main) for (const edge of branch) edge.node = edge.node.replace(/\d+$/, '');
+  return [name.replace(/\d+$/, ''), outputs];
+}));
 const summary = workflow.nodes.find(node => node.name === 'Format backup summary').parameters.jsCode;
 const validate = workflow.nodes.find(node => node.name === 'Validate backup result').parameters.jsCode;
 

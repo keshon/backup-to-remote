@@ -9,7 +9,8 @@ Use explicit status checks for expected failures. Avoid calling a multi-step
 operation in an `if`, `!`, or `&&`/`||` chain: Bash suppresses errexit throughout
 that function. Keep `pipefail`, inherited errexit and JSON/stdout separation.
 The EXIT trap owns scratch cleanup and recovery of containers stopped by this run.
-Do not delete a failed restart journal or commit a fingerprint before verification.
+Do not delete a failed restart journal or commit a fingerprint before the selected verification (full readback by default,
+remote size with --skip-hash-check).
 
 Cloud configuration must stay in memory. Never add credentials to examples,
 fixtures, logs or commits. Existing private `.env` and `rclone.conf` files are

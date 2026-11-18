@@ -70,6 +70,8 @@ rclone config. It does not read the old `.env` or `rclone.conf` files.
 | Preview selected apps | `sudo bash backup.sh plan` |
 | Read the last result | `sudo bash backup.sh status` |
 | Save a new archive even if unchanged | `sudo bash backup.sh --force` |
+| Skip full upload download/check | `sudo bash backup.sh --skip-hash-check` |
+| Accept files changing during copying | `sudo bash backup.sh --allow-live-changes` |
 | Read cloud capacity | `sudo bash backup.sh space` |
 | Use another settings file | `sudo bash backup.sh --config /absolute/path/backup.conf` |
 | Get machine-readable results | `sudo bash backup.sh --json` |
@@ -95,11 +97,23 @@ space above that reserve. Other processes can still consume space concurrently.
 Temporary files are removed on ordinary success and failure. After a power loss
 or SIGKILL, a `run.*` scratch folder may remain in `STATE_DIR`.
 
+Archives use gzip compression (the default gzip level, 6).
+
+`--skip-hash-check` checks the remote size instead of downloading the upload. The
+local SHA-256 sidecar is still saved for restore checks, but uploaded content is
+not fully verified. `--allow-live-changes` accepts a mismatch between the initial
+scan and archived content, and GNU tar warnings about changing files. Other tar
+errors still fail. This is a best-effort copy: live databases may be inconsistent.
+Configured `--stop` containers still stop; this flag does not override them.
+Both flags can be combined. For n8n, append them after `run --json` in the
+**Run backup** command. Defaults keep both checks enabled.
+
 Each upload is downloaded through rclone and SHA-256 checked before the script
 records success. This doubles archive transfer traffic. Only then does it apply
 `KEEP` retention within that server/app folder. Archives without a completion
 checksum, such as interrupted uploads, are left for manual inspection and do not
-count toward retention. The latest verified archive is always retained.
+count toward retention. The latest completed archive is always retained. With `--skip-hash-check`, completion
+means a size check rather than a full content check.
 
 ## n8n
 

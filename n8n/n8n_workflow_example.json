@@ -125,12 +125,6 @@
       "executeOnce": true,
       "id": "55b6bed6-c39a-4e55-a247-a954c1f3ffc8",
       "webhookId": "ec2d66bb-a643-4fc1-90f8-10f6f0aa1d2d",
-      "credentials": {
-        "discordWebhookApi": {
-          "id": "A2fYRiSt6H5rDzlJ",
-          "name": "Ctrl+Z Webhook account"
-        }
-      },
       "disabled": true,
       "onError": "continueRegularOutput"
     },
@@ -158,7 +152,6 @@
       "notes": "Add a Telegram bot credential and chat ID, then enable this node. Disable Discord or Telegram independently."
     }
   ],
-  "pinData": {},
   "connections": {
     "Settings": {
       "main": [
