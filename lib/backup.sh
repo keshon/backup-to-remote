@@ -79,14 +79,14 @@ backup_app() {
     log "$id: checking for changes."
     stop_containers "$id"
     fingerprint=$(tar_app "$id" | digest)
-    if [[ -f $STATE_DIR/$id.json ]]; then
-        previous=$(jq -er '.fingerprint' "$STATE_DIR/$id.json")
-        saved=$(jq -er '.archive' "$STATE_DIR/$id.json")
+    if [[ -f $STATE_DIR/apps/$id.json ]]; then
+        previous=$(jq -er '.fingerprint' "$STATE_DIR/apps/$id.json")
+        saved=$(jq -er '.archive' "$STATE_DIR/apps/$id.json")
     fi
     if ! $force && [[ $fingerprint == "$previous" ]]; then
         recover_containers
         rclone_run lsjson "$remote/$saved" --stat > "$work/remote-stat.json"
-        [[ $(jq -er '.Size' "$work/remote-stat.json") == "$(jq -er '.bytes' "$STATE_DIR/$id.json")" ]] || die "App $id: the last remote archive has a different size. Run again with --force after checking cloud storage."
+        [[ $(jq -er '.Size' "$work/remote-stat.json") == "$(jq -er '.bytes' "$STATE_DIR/apps/$id.json")" ]] || die "App $id: the last remote archive has a different size. Run again with --force after checking cloud storage."
         log "$id: unchanged; last remote archive is present."
         record_app "$id" "$saved" 0 true
         prune_app "$remote" "$saved"
@@ -117,7 +117,7 @@ backup_app() {
     printf '%s  %s\n' "$packed_hash" "$name" | rclone_run rcat "$remote/$name.sha256"
     jq -n --arg fingerprint "$fingerprint" --arg archive "$name" --argjson bytes "$bytes" \
         '{fingerprint:$fingerprint,archive:$archive,bytes:$bytes}' > "$work/state.json"
-    mv -- "$work/state.json" "$STATE_DIR/$id.json"
+    mv -- "$work/state.json" "$STATE_DIR/apps/$id.json"
     record_app "$id" "$name" "$bytes" false
     prune_app "$remote" "$name"
     rm -- "$archive"

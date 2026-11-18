@@ -101,6 +101,7 @@ trap 'failure="Terminated. Containers will be restarted before exit."; exit 143'
 trap 'failure=${failure:-"An operation failed. Read $STATE_DIR/last-error.log on this VPS."}' ERR
 exec 2> >(tee "$STATE_DIR/last-error.log" >&2)
 recover_containers
+mkdir -p -- "$STATE_DIR/apps"
 validate_sources
 for id in "${APP_IDS[@]}"; do
     current_app=$id

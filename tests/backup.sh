@@ -68,22 +68,32 @@ exec "$real_rclone" "$@"
 EOF
 chmod +x "$tmp/bin/rclone"
 export PATH="$tmp/bin:$PATH"
-before=$(sha256sum "$tmp/state/my-app.json")
+before=$(sha256sum "$tmp/state/apps/my-app.json")
 printf 'second version\n' > "$tmp/source space/file"
 export FAIL_UPLOAD=1
 expect_failure
 jq -e '.status == "failed" and .temporary_files_cleaned' "$tmp/result"
-[[ $(sha256sum "$tmp/state/my-app.json") == "$before" ]]
+[[ $(sha256sum "$tmp/state/apps/my-app.json") == "$before" ]]
 assert_clean
 unset FAIL_UPLOAD
 export FAIL_READBACK=1
 expect_failure
-[[ $(sha256sum "$tmp/state/my-app.json") == "$before" ]]
+[[ $(sha256sum "$tmp/state/apps/my-app.json") == "$before" ]]
 assert_clean
 unset FAIL_READBACK
 run
 jq -e '.status == "success" and (.apps[0].unchanged | not)' "$tmp/result"
 [[ $(find "$dest" -name '*.tar.gz.sha256' | wc -l) -eq 2 ]]
+cp "$tmp/config" "$tmp/no-space-config"
+printf 'RESERVE_MIB=999999999\n' >> "$tmp/no-space-config"
+before=$(sha256sum "$tmp/state/apps/my-app.json")
+if bash "$ROOT/backup.sh" --force --config "$tmp/no-space-config" --json > "$tmp/result"; then
+    printf 'Expected insufficient-space failure\n' >&2
+    exit 1
+fi
+jq -e '.status == "failed" and (.error | contains("space")) and .temporary_files_cleaned' "$tmp/result"
+[[ $(sha256sum "$tmp/state/apps/my-app.json") == "$before" ]]
+assert_clean
 printf 'third version\n' > "$tmp/source space/file"
 export FAIL_PRUNE=1
 expect_failure
@@ -111,7 +121,7 @@ case $1 in
 esac
 EOF
 chmod +x "$tmp/bin/docker"
-printf "app database '%s/source space' --stop fixture-db\n" "$tmp" >> "$tmp/config"
+printf "app last-run '%s/source space' --stop fixture-db\n" "$tmp" >> "$tmp/config"
 export FAIL_START=1
 expect_failure
 [[ -f $tmp/state/stopped-containers ]]

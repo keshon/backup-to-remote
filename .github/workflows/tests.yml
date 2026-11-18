@@ -8,7 +8,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install test dependencies
-        run: sudo apt-get update && sudo apt-get install -y rclone jq shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: First launch installs missing runtime tools
+        run: |
+          scratch=$(mktemp -d)
+          trap 'rm -rf -- "$scratch"' EXIT
+          printf 'SERVER_ID=bootstrap-test\nREMOTE=fixture:backups\nSTATE_DIR=%s/state\napp sample %s\n' "$scratch" "$scratch" > "$scratch/settings"
+          sudo bash backup.sh plan --config "$scratch/settings"
+          command -v rclone
+          command -v jq
+          test ! -e "$scratch/state"
       - name: Shell syntax and style
         run: |
           bash -n backup.sh
