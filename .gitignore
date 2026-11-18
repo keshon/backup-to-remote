@@ -1,2 +1,9 @@
 .env
 app_paths.txt
+.env.*
+!.env.example
+rclone.conf
+backup.conf
+.test-tmp/
+*.tar.gz
+*.sha256

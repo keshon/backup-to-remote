@@ -1,260 +1,199 @@
-# Backup-to-Remote Scripts
+# Backup to Remote
 
-A modular and maintainable backup solution using **Bash + rclone** for local and remote backups of multiple directories, with automated cleanup and statistics. This small project is designed to be **configurable and suitable for automation** via tools like **n8n**.
+Bash scripts for backing up Ubuntu VPS folders to rclone storage, including a
+union of cloud accounts. Each changed app gets a complete `.tar.gz` archive.
+Download it and unpack it with tar or 7-Zip.
 
----
+No systemd installation, background service, enrollment, or backup gateway.
+Missing command-line tools are installed with apt on first use. Run through n8n
+or start a backup manually.
 
-## Table of Contents
+## Set up a VPS
 
-- [Features](#features)  
-- [Directory Structure](#directory-structure)  
-- [Scripts Overview](#scripts-overview)  
-- [Requirements](#requirements)  
-- [Setup](#setup)  
-- [Environment Variables](#environment-variables)  
-- [Usage](#usage)  
-- [n8n Integration](#n8n-integration)  
-
----
-
-## Features
-
-- Back up multiple directories specified in `paths` file.
-- Only create new backups when changes are detected.
-- Upload backups to a remote storage via **rclone**.
-- Keep a configurable number of backup copies on the remote.
-- Clean up old backups locally and remotely.
-- Generate human-readable storage statistics.
-- Fully configurable through environment variables.
-- Modular script structure for maintainability and scalability.
-- Works with temporary rclone configs (via environment variable) for secure automation.
-- Can be integrated into automated pipelines (like n8n, cron jobs, or CI/CD).
-
----
-
-## Directory Structure
-
-```
-
-backup-to-remote/
-├── lib/
-│   ├── dependencies.sh            # Check dependencies
-│   ├── logging.sh                 # Logging utilities
-│   └── rclone_utils.sh            # Rclone initialization and verification
-├── n8n/
-│   └── n8n_workflow_example.json  # n8n workflow
-├── .env                           # Environment variables (not committed)
-├── backup.sh                      # Main backup script
-├── cleanup.sh                     # Cleanup old backups (local + remote)
-├── LICENSE                        # MIT License
-├── paths.example                  # List of directories to back up
-├── rclone.conf                    # Optional: rclone configuration (or pass via env)
-├── README.md                      # Documentation
-├── stats.sh                       # Generate storage statistics
-└── upload.sh                      # Upload backup archives to remote
-
-````
-
----
-
-## Scripts Overview
-
-> The scripts read their configuration from environment variables (from `.env` or runtime env overrides). Where a script accepts command-line arguments, this is shown explicitly.
-
-### `backup.sh`
-**Purpose:** orchestrates backups for all paths from `LIST_FILE`.  
-**CLI args:** none.  
-**Reads:** `.env` / runtime env overrides.  
-**Behavior & what it calls:**
-- For each path in `LIST_FILE` it detects changes, builds a `.zip` archive if needed.
-- Calls `upload.sh <archive_path>` to upload the created archive.
-- Calls `cleanup.sh [local_backup_path]` to remove local `.zip`s and prune remote backups.
-- Calls `stats.sh` at the end (no args by default; optional remote path supported by `stats.sh`).
-**Example (manual):**
-```bash
-source .env
-bash backup.sh
-````
-
-### `upload.sh`
-
-**Purpose:** upload a single archive to the remote using rclone and verify it.
-**Usage:** `./upload.sh <path-to-archive>`
-**Required env vars:** `RCLONE_CONFIG_PATH` *or* `RCLONE_CONFIG_CONTENT` (base64), `RCLONE_CONFIG_NAME`, `REMOTE_PATH`.
-**Behavior:**
-
-* Uploads the archive via `rclone copy`.
-* Verifies the presence of the uploaded file on remote.
-* Deletes the local archive if verification succeeds.
-  **Example:**
+On the target VPS:
 
 ```bash
-./upload.sh /opt/backup/myapp_20250918120000.zip
+git clone https://github.com/keshon/backup-to-remote.git /opt/scripts/backup-to-remote
+cd /opt/scripts/backup-to-remote
+bash backup.sh init
+nano backup.conf
 ```
 
-### `cleanup.sh`
-
-**Purpose:** prune old backups both on remote and locally.
-**Usage:** `./cleanup.sh [local-backup-path]`
-**Optional arg:** `local-backup-path` (if not provided the script uses `LOCAL_BACKUP_PATH` from env).
-**Required env vars:** `RCLONE_CONFIG_PATH` *or* `RCLONE_CONFIG_CONTENT`, `RCLONE_CONFIG_NAME`, `REMOTE_PATH`, `COPIES_TO_KEEP`.
-**Behavior:**
-
-* Lists files in `RCLONE_CONFIG_NAME:REMOTE_PATH`, keeps the newest `COPIES_TO_KEEP` per backup base name, deletes older copies.
-* Removes local `.zip` files from `LOCAL_BACKUP_PATH` (or from provided arg).
-  **Example:**
+Choose a unique server name, your existing rclone remote and destination folder,
+and the apps to include:
 
 ```bash
-./cleanup.sh /opt/backup
-# or let env handle local path
-./cleanup.sh
+SERVER_ID=backtobed
+REMOTE=union-koofr:backups
+STATE_DIR=/var/lib/backup-to-remote
+KEEP=3
+RESERVE_MIB=512
+TIMEOUT_SECONDS=14400
+
+app back2bed-prod /opt/dockers/back2bed-prod --stop back2bed-prod
+app website /opt/dockers/keshon.ru --exclude './logs'
 ```
 
-### `stats.sh`
-
-**Purpose:** show remote storage stats (file listing & totals).
-**Usage:** `./stats.sh [remote-path]`
-**Optional arg:** `remote-path` (defaults to `REMOTE_PATH` from env).
-**Required env vars:** `RCLONE_CONFIG_PATH` *or* `RCLONE_CONFIG_CONTENT`, `RCLONE_CONFIG_NAME`.
-**Behavior:**
-
-* Prints a human-readable list of files & sizes in the remote path.
-* Shows total/used/free reported by `rclone about`.
-  **Example:**
+`backup.conf` contains trusted Bash settings. Quote paths and patterns containing
+spaces or wildcards. Add or remove `app` lines to change the selection. Repeat
+`--stop` for multiple writer containers or `--exclude` for multiple patterns.
+Use the actual container names from `docker ps -a`.
 
 ```bash
-./stats.sh      # uses REMOTE_PATH from .env or env
-./stats.sh backups/daily  # inspect a different remote subpath
+sudo bash backup.sh plan
+sudo bash backup.sh
 ```
 
----
+The first command checks folders and container access without stopping anything
+or contacting the cloud. Either command installs missing dependencies if needed:
+Bash 4.4+, GNU tar/coreutils, gzip, util-linux, jq and rclone. Ubuntu is supported;
+the automatic installation requires root or passwordless sudo. Docker must
+already exist if you use `--stop`.
 
-## Requirements
-
-* `rclone` (recent stable release)
-* `zip`
-* Bash with `set -o pipefail` support
-* Optional: `cron`, `systemd` timers, or `n8n` for automation
-
-Install on Debian/Ubuntu:
+The backup command asks you to paste a **base64-encoded rclone configuration**
+at a hidden prompt. Prepare that value on the machine holding your cloud config:
 
 ```bash
-sudo apt update
-sudo apt install -y rclone zip
+base64 -w0 /path/to/rclone.conf
 ```
 
----
+Supply it again for each manual run, or let n8n supply it as described below.
+All remotes referenced by your union must be included in that configuration.
+The script passes it through an in-memory pipe and never saves a target-side
+rclone config. It does not read the old `.env` or `rclone.conf` files.
 
-## Setup
+## Daily use
 
-1. Clone the repository:
+| Task | Command |
+| --- | --- |
+| Back up | `sudo bash backup.sh` |
+| Preview selected apps | `sudo bash backup.sh plan` |
+| Read the last result | `sudo bash backup.sh status` |
+| Save a new archive even if unchanged | `sudo bash backup.sh --force` |
+| Read cloud capacity | `sudo bash backup.sh space` |
+| Use another settings file | `sudo bash backup.sh --config /absolute/path/backup.conf` |
+| Get machine-readable results | `sudo bash backup.sh --json` |
+| Show help | `bash backup.sh --help` |
+
+Change detection reads the files and their archived metadata. It detects content,
+permissions, ownership, symlinks, empty folders, additions and deletions. It avoids
+uploading unchanged apps; it does not upload individual changed chunks. For an
+unchanged app, it confirms that the last archive still exists with its saved size.
+Use `--force` to upload and fully verify another copy.
+
+For apps with `--stop`, the script stops only containers that were running. They
+stay stopped during fingerprinting and archive creation, including a brief
+fingerprint scan on unchanged runs. They restart before uploading. Initially
+stopped containers remain stopped. Databases and custom WAL stores need this
+consistency boundary; mapping their files into a folder alone is insufficient.
+Other writers outside the configured containers must also be stopped by you.
+Live folders that change during the scan or archive can cause a failed run.
+
+Apps are processed one at a time. The script estimates required scratch space
+and reserves `RESERVE_MIB`, then limits archive file growth to the available
+space above that reserve. Other processes can still consume space concurrently.
+Temporary files are removed on ordinary success and failure. After a power loss
+or SIGKILL, a `run.*` scratch folder may remain in `STATE_DIR`.
+
+Each upload is downloaded through rclone and SHA-256 checked before the script
+records success. This doubles archive transfer traffic. Only then does it apply
+`KEEP` retention within that server/app folder. Archives without a completion
+checksum, such as interrupted uploads, are left for manual inspection and do not
+count toward retention. The latest verified archive is always retained.
+
+## n8n
+
+Import [n8n/n8n_workflow_example.json](n8n/n8n_workflow_example.json).
+
+1. Set the SSH credential on **Run backup** and **Read cloud space**. Both execute
+   on the target VPS with access to the selected folders and Docker.
+2. In **Settings**, fill `rcloneConfigBase64` with the encoded config from the
+   machine holding your credentials. The example contains no credentials.
+3. Check the script path in both SSH nodes if you used another checkout location.
+4. Configure and enable **Discord**. **Telegram** stays disabled until you add its
+   bot credential and chat ID. Each notification node can be toggled independently.
+5. Test **Manual backup**, then publish the Wednesday 05:00 Moscow schedule if wanted.
+
+The workflow keeps the coloured Discord embed, per-app results, uploaded bytes,
+cloud capacity bar and Telegram HTML formatting. Backup failures stop the success
+notification; a failed capacity query shows capacity as unavailable. Configure an
+n8n error workflow if you also want failure alerts.
+
+Credentials exist in memory on the target during execution. Base64 is encoding,
+not encryption. The n8n Settings value and resolved SSH command can appear in
+saved workflow/execution data; restrict access and set an appropriate execution
+retention policy. The script cannot prevent n8n from storing its own inputs.
+This config transport suits remotes such as Koofr with static credentials; remotes
+that need to save refreshed OAuth tokens need another credential arrangement.
+
+There are no installed schedules to manage. Disable the workflow in n8n to stop
+automatic backups. If migrating from the previous tool, separately disable its
+old n8n workflow and timer so they no longer run.
+
+## Restore
+
+Cloud layout:
+
+```text
+backups/backtobed/back2bed-prod/
+  20261118T050000Z-a1B2c3D4.tar.gz
+  20261118T050000Z-a1B2c3D4.tar.gz.sha256
+```
+
+Download an archive and its checksum using the cloud website or rclone. On Linux:
 
 ```bash
-git clone https://github.com/keshon/backup-to-remote
-cd backup-to-remote
+sha256sum -c 20261118T050000Z-a1B2c3D4.tar.gz.sha256
+mkdir restored
+sudo tar --numeric-owner --acls --xattrs -xzpf 20261118T050000Z-a1B2c3D4.tar.gz -C restored
 ```
 
-2. Edit `paths` file — one absolute path per line.
+Each archive contains that app folder's contents. Inspect the extracted files,
+stop the destination app, then move the restored data into place. Windows tools
+can extract the files, but Linux is needed to restore Linux ownership and modes.
+Archives are not encrypted by this script; cloud storage receives ordinary files.
 
-3. Create `.env` from the example and edit as needed:
+## If something fails
+
+The command exits nonzero. `--json` returns a failed result for errors occurring
+inside a backup run; configuration and startup errors print to stderr and may
+exit before a result can be created. n8n checks both exit status and JSON.
 
 ```bash
-cp .env.example .env
-nano .env
+sudo bash backup.sh status
+sudo tail -n 80 /var/lib/backup-to-remote/last-error.log
 ```
 
----
+Use your configured `STATE_DIR` if different. A failed upload does not update the
+saved fingerprint, so the next run tries again. No remote repository repair or
+cloud lock deletion is involved. A local `flock` prevents overlapping runs on
+this VPS and releases automatically on exit; use a unique `SERVER_ID` on each VPS.
 
-## Environment Variables
+If a container cannot restart, its name remains in `STATE_DIR/stopped-containers`.
+The next backup attempts those restarts first. You can also run `docker start`
+for those names manually. A killed process cannot run cleanup, so check container
+state after a forced termination before leaving the server unattended.
 
-| Variable                | Description                                                 |
-| ----------------------- | ----------------------------------------------------------- |
-| `LIST_FILE`             | Path to the file listing directories to back up             |
-| `LOCAL_BACKUP_PATH`     | Local backup directory to store archives and tracking files |
-| `UPLOAD_SCRIPT`         | Path to upload script (default: `./upload.sh`)              |
-| `CLEANING_SCRIPT`       | Path to cleanup script (default: `./cleanup.sh`)            |
-| `STATS_SCRIPT`          | Path to statistics script (default: `./stats.sh`)           |
-| `COPIES_TO_KEEP`        | Number of remote backups to retain per base name            |
-| `RCLONE_CONFIG_PATH`    | Optional path to `rclone.conf`                              |
-| `RCLONE_CONFIG_CONTENT` | Base64-encoded `rclone.conf` content (overrides path)       |
-| `RCLONE_CONFIG_NAME`    | Name of the rclone remote to use                            |
-| `REMOTE_PATH`           | Remote path for storing backups                             |
+To update, run `git pull --ff-only` in the checkout. Your ignored `backup.conf`
+is kept. Nothing is copied into `/usr/local` and there is no installer to rerun.
+To remove the tool, disable its n8n workflow and remove the checkout. Keep or
+remove `STATE_DIR` separately; it contains local results and change fingerprints.
+Cloud archives are unaffected.
 
-> Tip: pass `RCLONE_CONFIG_CONTENT` + `RCLONE_CONFIG_NAME` + `REMOTE_PATH` as **ephemeral env vars** from n8n or an SSH one-liner. They live only in that session.
+## Development
 
----
-
-## Usage
-
-### Manual run (local server)
+Run on Ubuntu with jq, rclone, shellcheck and Node.js installed:
 
 ```bash
-source .env
-bash backup.sh
+shellcheck backup.sh stats.sh lib/*.sh tests/backup.sh
+bash tests/backup.sh
+node --test tests/test_notifications.cjs
 ```
 
-### One-line with ephemeral rclone config (safe for automation)
+The Bash suite uses a temporary local rclone remote, never production credentials.
+It covers extraction, permissions, symlinks, change detection, failed uploads and
+readback, retention, overlap protection, and container restart recovery through a
+Docker fixture. GitHub Actions runs these checks on Ubuntu 24.04. Cloud-provider
+behaviour still needs a disposable fixture upload before adopting a deployment.
 
-```bash
-export RCLONE_CONFIG_CONTENT="<base64-encoded rclone config>"
-export RCLONE_CONFIG_NAME="<rclone remote name>"
-export REMOTE_PATH="<remote path name>"
-bash backup.sh
-```
-
-This runs `backup.sh` in a single ephemeral shell where the three env vars exist only for that command. No need to unset them afterwards.
-
----
-
-## n8n Integration
-
-This project is designed to work seamlessly with **[n8n](https://n8n.io/)** for automation.  
-An example workflow is provided in [`./n8n/n8n_workflow_example.json`](./n8n/n8n_workflow_example.json).
-
-![n8n_workflow_screenshot](./n8n/n8n_workflow_screenshot.png)
-
-### What the Workflow Does
-
-- **Triggers**  
-  - Run manually with a test trigger.  
-  - Run on schedule (e.g., every Wednesday at 5 AM).  
-  - Run via a secure webhook.  
-
-- **Configuration**  
-  - A `Set` node defines the rclone config, selected remote, remote path, and working directory.  
-  - A `Code` node encodes the `rclone.conf` to Base64 for safe passing to the backup scripts.  
-
-- **Execution**  
-  - Runs `backup.sh` via an **SSH node** with environment variables passed securely.  
-  - Runs `stats.sh` to gather storage statistics after the backup completes.  
-
-- **Notification**  
-  - Posts a completion message (with logs included) into a Discord channel via a Discord Bot node.
-
-### Integration Notes
-
-1. Place your raw `rclone.conf` in the **Settings node** of the workflow.  
-   - It is automatically converted to **Base64** and passed as `RCLONE_CONFIG_CONTENT`.  
-2. The workflow exports the following env vars to the SSH node:
-   - `RCLONE_CONFIG_CONTENT` (Base64 config)  
-   - `RCLONE_CONFIG_NAME` (remote name, e.g., `union-koofr`)  
-   - `REMOTE_PATH` (remote backup folder, e.g., `tw-cute-halimede`)  
-3. The remote server runs `backup.sh` or `stats.sh` with these env vars, meaning **no credentials are stored permanently on disk**.  
-4. After execution, results are piped back to Discord for monitoring.
-
-### Importing the Example Workflow
-
-1. In n8n, open **Workflows → Import from File**.  
-2. Select [`./n8n/n8n_workflow_example.json`](./n8n/n8n_workflow_example.json).  
-3. Update the following nodes with your own values:
-   - **SSH node** → your server credentials.  
-   - **Discord node** → your bot and channel.  
-   - **Schedule/Webhook** → adapt to your automation needs.  
-
-This allows fully automated **weekly backups**, with monitoring and statistics, and without storing plain credentials on your server.
-
----
-
-## License
-
-MIT License. See [LICENSE](LICENSE) for details.
+MIT license. See [LICENSE](LICENSE).

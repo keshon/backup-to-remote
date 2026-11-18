@@ -1,0 +1,14 @@
+# Create your settings with: bash backup.sh init
+# Trusted Bash settings. Keep cloud credentials in n8n, not in this file.
+SERVER_ID=change-me
+REMOTE=union-koofr:backups
+STATE_DIR=/var/lib/backup-to-remote
+KEEP=3
+RESERVE_MIB=512
+TIMEOUT_SECONDS=14400
+
+# app NAME ABSOLUTE_FOLDER [--stop CONTAINER] [--exclude PATTERN]
+# Repeat --stop and --exclude when needed. Initially stopped containers stay stopped.
+app melodix /opt/dockers/melodix --stop melodix-app-1
+# app website /opt/dockers/keshon.ru --exclude './logs'
+# app n8n /opt/dockers/n8n --stop n8n-n8n-1

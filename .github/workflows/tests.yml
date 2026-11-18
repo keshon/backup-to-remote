@@ -1,0 +1,23 @@
+name: Tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  ubuntu:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install test dependencies
+        run: sudo apt-get update && sudo apt-get install -y rclone jq shellcheck
+      - name: Shell syntax and style
+        run: |
+          bash -n backup.sh
+          bash -n lib/common.sh
+          bash -n lib/backup.sh
+          shellcheck backup.sh stats.sh lib/*.sh tests/backup.sh
+          bash backup.sh --help
+          if bash backup.sh --config; then exit 1; fi
+      - name: Backup and recovery with a real local rclone remote
+        run: bash tests/backup.sh
+      - name: Notification design and independent destinations
+        run: node --test tests/test_notifications.cjs
