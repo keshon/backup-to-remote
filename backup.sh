@@ -83,7 +83,13 @@ if [[ $command == plan ]]; then
 fi
 load_credentials
 if [[ $command == space ]]; then
-    rclone_run about "$REMOTE" --json | jq '{status:"success",total_bytes:.total,used_bytes:.used,free_bytes:.free}'
+    capacity=$(rclone_run about "$REMOTE" --json)
+    if $json; then
+        jq '{status:"success",total_bytes:.total,used_bytes:.used,free_bytes:.free}' <<< "$capacity"
+    else
+        jq -r 'def gib: if type == "number" then ((. / 107374182.4 | round) / 10 | tostring) + " GiB" else "unavailable" end;
+            "Cloud storage", "Free:  \(.free | gib)", "Used:  \(.used | gib)", "Total: \(.total | gib)"' <<< "$capacity"
+    fi
     exit 0
 fi
 
