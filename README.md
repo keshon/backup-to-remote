@@ -119,6 +119,10 @@ cloud capacity bar and Telegram HTML formatting. Backup failures stop the succes
 notification; a failed capacity query shows capacity as unavailable. Configure an
 n8n error workflow if you also want failure alerts.
 
+If you back up the n8n container itself with `--stop`, start that backup manually
+or from another n8n instance. A workflow cannot reliably finish its notifications
+after stopping its own orchestrator.
+
 Credentials exist in memory on the target during execution. Base64 is encoding,
 not encryption. The n8n Settings value and resolved SSH command can appear in
 saved workflow/execution data; restrict access and set an appropriate execution
