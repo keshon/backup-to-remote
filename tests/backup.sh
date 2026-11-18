@@ -19,7 +19,7 @@ app my-app '$tmp/source space' --exclude './ignored.log'
 EOF
 export RCLONE_CONFIG_CONTENT
 RCLONE_CONFIG_CONTENT=$(printf '[fixture]\ntype = local\n' | base64 -w0)
-run() { bash "$ROOT/backup.sh" run --config "$tmp/config" --json > "$tmp/result"; }
+run() { bash "$ROOT/backup.sh" run --hash-check --config "$tmp/config" --json > "$tmp/result"; }
 expect_failure() { if run; then printf 'Expected failure, got success\n' >&2; exit 1; fi; }
 assert_clean() { [[ -z $(find "$tmp/state" -maxdepth 1 -type d -name 'run.*' -print) ]]; }
 
@@ -81,7 +81,7 @@ expect_failure
 [[ $(sha256sum "$tmp/state/apps/my-app.json") == "$before" ]]
 assert_clean
 # The opt-out must not call cat, and must report its weaker verification.
-bash "$ROOT/backup.sh" --config "$tmp/config" --json --skip-hash-check > "$tmp/result"
+bash "$ROOT/backup.sh" --config "$tmp/config" --json > "$tmp/result"
 jq -e '.status == "success" and .apps[0].verification == "remote-size"' "$tmp/result"
 unset FAIL_READBACK
 run
@@ -113,7 +113,7 @@ jq -e '.status == "success" and .apps[0].unchanged' "$tmp/result"
 
 # Per-app hash opt-out must not weaken the next app; CLI opts out for all apps.
 sed '/^app /s/$/ --skip-hash-check/' "$tmp/config" > "$tmp/mixed-config"
-printf "app strict '%s/source space'\n" "$tmp" >> "$tmp/mixed-config"
+printf "app strict '%s/source space' --hash-check\n" "$tmp" >> "$tmp/mixed-config"
 export FAIL_READBACK=1
 if bash "$ROOT/backup.sh" --force --config "$tmp/mixed-config" --json > "$tmp/result"; then
     echo 'Per-app hash option leaked into strict app' >&2; exit 1

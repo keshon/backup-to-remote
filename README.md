@@ -68,6 +68,7 @@ It never saves a cloud config on the target or reads the old `.env` or
 | --- | --- |
 | Back up | `sudo bash backup.sh` (or `sudo bash backup.sh run`) |
 | Preview apps and their checks | `sudo bash backup.sh plan` |
+| Stop an active backup | `sudo bash backup.sh stop` |
 | Read the last result | `sudo bash backup.sh status` |
 | Read cloud capacity | `sudo bash backup.sh space` |
 | Create settings | `bash backup.sh init` |
@@ -83,7 +84,8 @@ It never saves a cloud config on the target or reads the old `.env` or
 | `FOLDER` | Required | Absolute folder to back up. |
 | `--stop CONTAINER` | OFF; no containers stopped | Stop a writer during scanning and copying. Repeat for multiple containers. |
 | `--exclude PATTERN` | OFF; nothing excluded | Exclude a tar pattern. Repeat for multiple patterns. |
-| `--skip-hash-check` | OFF; full hash check ON | Skip downloading the uploaded archive. Check its size and save the local checksum. |
+| `--hash-check` | OFF; remote size check ON | Download the uploaded archive and verify SHA-256. |
+| `--skip-hash-check` | Size-only check is already the default | Compatibility option: turn off full hash checking for this app. |
 | `--allow-live-changes` | OFF; reject changing files | Accept changes between scanning and copying, including GNU tar's changed-file warnings. Live database copies may be inconsistent. |
 
 ### Command-line options
@@ -93,13 +95,15 @@ It never saves a cloud config on the target or reads the old `.env` or
 | `--config FILE` | `backup.conf` beside the script | Read another settings file. |
 | `--json` | OFF; readable output | Write JSON to stdout and progress to stderr. Applies to run, status and space. |
 | `--force` | OFF; skip unchanged apps | Create a new archive even if the app is unchanged. |
-| `--skip-hash-check` | OFF | Skip the full uploaded hash check for every app in this run. |
+| `--hash-check` | OFF | Download and verify each new upload for every app in this run. |
+| `--skip-hash-check` | Size-only check is already the default | Turn off full hash checking for every app, including apps with `--hash-check`. |
 | `--allow-live-changes` | OFF | Accept changing files for every app in this run. |
 | `--help`, `-h` | OFF | Show help and exit. |
 
-Command-line skip options apply to every app. An app without either option keeps
-both checks enabled unless a command-line option overrides it. Neither option
-cancels configured container stops. `plan` shows the effective checks per app.
+Command-line options apply to every app and override per-app settings. If both
+hash options are supplied, the last one wins. Full hash checking is OFF by
+default; rejecting changing files is ON. These flags do not cancel configured
+container stops. `plan` shows the effective checks per app.
 
 ### Settings and credentials
 
@@ -136,20 +140,22 @@ or SIGKILL, a `run.*` scratch folder may remain in `STATE_DIR`.
 
 The script compares a scan taken before compression with the archive it creates.
 Logs or database writes between those reads can fail the run. To accept a live
-copy for one app and skip its full upload check, use:
+copy for a website while checking uploads for a database, use:
 
 ```bash
-app website /opt/dockers/keshon.ru --skip-hash-check --allow-live-changes
-app database /opt/dockers/database --stop database-db-1
+app website /opt/dockers/keshon.ru --allow-live-changes
+app database /opt/dockers/database --stop database-db-1 --hash-check
 ```
 
-Here only `website` skips those checks; `database` keeps them enabled. n8n reads
+Here `website` accepts changing files and checks uploaded size. `database`
+rejects changing files and verifies the uploaded hash. n8n reads
 the same settings, so its command needs no changes.
 
-By default, the script downloads each upload and checks its SHA-256 before
-recording success. This adds another archive-sized transfer. With
-`--skip-hash-check`, it checks the remote size instead. GNU tar errors other than
-changed-file warnings still fail, even with `--allow-live-changes`.
+By default, the script checks the uploaded size before recording success. Add
+`--hash-check` to download the upload again and verify its SHA-256; this adds
+another archive-sized transfer. Both modes save a local checksum for restore
+checks. GNU tar errors other than changed-file warnings still fail, even with
+`--allow-live-changes`.
 
 After the selected check passes, the script saves the local checksum beside the
 archive and applies `KEEP` retention. Archives without that completion file are
@@ -214,6 +220,24 @@ stop the destination app, then move the restored data into place. Windows tools
 can extract the files, but Linux is needed to restore Linux ownership and modes.
 Archives are not encrypted by this script; cloud storage receives ordinary files.
 
+## Stop a backup
+
+Press Ctrl+C in the terminal where it is running, or use another SSH session:
+
+```bash
+sudo bash backup.sh stop
+```
+
+With a custom config, pass the same `--config FILE` to the stop command. It stops
+active archiving/uploading and waits for temporary-file cleanup and container
+restart attempts. Check the result for any restart failure. Stopping a workflow
+in n8n alone may leave its remote SSH command running; use this command on the VPS.
+
+The active process is recorded in `STATE_DIR/run.pid`. The lock is
+`STATE_DIR/run.lock`, which defaults to `/var/lib/backup-to-remote/run.lock`.
+Do not delete it: removing a lock file cannot stop its owner and can let two runs
+overlap. A normal stop releases the lock automatically. The empty file can stay.
+
 ## If something fails
 
 The command exits nonzero. `--json` returns a failed result for errors occurring
@@ -245,14 +269,17 @@ Cloud archives are unaffected.
 Run on Ubuntu with jq, rclone, shellcheck and Node.js installed:
 
 ```bash
-shellcheck -x backup.sh stats.sh tests/backup.sh
+shellcheck -x backup.sh stats.sh tests/backup.sh tests/cancellation.sh
 bash tests/backup.sh
+bash tests/cancellation.sh
 node --test tests/test_notifications.cjs
 ```
 
 The Bash suite uses a temporary local rclone remote, never production credentials.
 It checks extraction, metadata, change detection, uploads, retention and local
-locking. Fake Docker commands exercise container restart recovery. GitHub Actions
+locking. Fake Docker commands exercise container restart recovery. Cancellation
+tests stop long-running archive and upload fixtures, then start another run
+without deleting the lock file. GitHub Actions
 runs these checks on Ubuntu 24.04. Test your cloud provider with disposable data
 before adopting a deployment.
 

@@ -24,10 +24,12 @@ jobs:
           bash -n backup.sh
           bash -n lib/common.sh
           bash -n lib/backup.sh
-          shellcheck -x backup.sh stats.sh tests/backup.sh
+          shellcheck -x backup.sh stats.sh tests/backup.sh tests/cancellation.sh
           bash backup.sh --help
           if bash backup.sh --config; then exit 1; fi
       - name: Backup and recovery with a real local rclone remote
-        run: bash tests/backup.sh
+        run: |
+          bash tests/backup.sh
+          timeout 90 bash tests/cancellation.sh
       - name: Notification design and independent destinations
         run: node --test tests/test_notifications.cjs

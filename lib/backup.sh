@@ -1,5 +1,50 @@
 #!/usr/bin/env bash
 
+stop_run() {
+    local pid token current
+    [[ -f $STATE_DIR/run.pid ]] || die "No active run was found in $STATE_DIR. There is no lock file to delete."
+    read -r pid token < "$STATE_DIR/run.pid"
+    [[ $pid =~ ^[0-9]+$ && $token =~ ^[0-9]+$ ]] || die "Invalid run record: $STATE_DIR/run.pid. Check running processes before removing that record."
+    current=$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null) || current=''
+    [[ $current == "$token" ]] || die "The recorded backup process has exited. If a child is still running, inspect it with ps before starting another backup."
+    kill -TERM "$pid" || die "Cannot stop process $pid. Run this command as the user who started the backup, or with sudo."
+    log "Stop requested for process $pid. Waiting for cleanup and container restarts."
+    # The supervisor holds this lock until its worker and recovery have finished.
+    exec 8>"$STATE_DIR/run.lock"
+    flock 8
+    exec 8>&-
+    log 'Backup stopped.'
+}
+
+cancel_run() {
+    local code=$1
+    trap '' INT TERM HUP
+    log 'Stopping backup work; waiting for cleanup and container restarts.'
+    if [[ -n $worker_pid ]]; then
+        kill -TERM -- "-$worker_pid" 2>/dev/null || true
+        wait "$worker_pid" || true
+    fi
+    exit "$code"
+}
+
+supervise_run() {
+    local worker_pid='' code token
+    mkdir -p -- "$STATE_DIR"
+    exec 9>"$STATE_DIR/run.lock"
+    flock -n 9 || die "A backup is already running. To cancel it: bash $SCRIPT_DIR/backup.sh stop --config $config. Lock: $STATE_DIR/run.lock (do not delete it)."
+    trap 'rm -f -- "$STATE_DIR/run.pid"' EXIT
+    trap 'cancel_run 130' INT
+    trap 'cancel_run 143' TERM HUP
+    # A separate process group lets cancellation reach tar/gzip/rclone pipelines.
+    BACKUP_WORKER_PARENT=$$ setsid bash "$SCRIPT_DIR/backup.sh" "${original_args[@]}" <&0 &
+    worker_pid=$!
+    token=$(awk '{print $22}' "/proc/$$/stat")
+    printf '%s %s\n' "$$" "$token" > "$STATE_DIR/run.pid"
+    if wait "$worker_pid"; then code=0; else code=$?; fi
+    exit "$code"
+}
+
+
 recover_containers() {
     [[ -f $STATE_DIR/stopped-containers ]] || return 0
     local container failed=false
@@ -85,8 +130,7 @@ prune_app() {
 
 backup_app() {
     local id=$1 fingerprint previous='' saved='' remote name archive packed_hash remote_hash stream_hash bytes verification
-    local skip_hash_check=$skip_hash_check allow_live_changes=$allow_live_changes
-    if ${APP_SKIP_HASH_CHECK[$id]}; then skip_hash_check=true; fi
+    local hash_check=${hash_check_override:-${APP_HASH_CHECK[$id]}} allow_live_changes=$allow_live_changes
     if ${APP_ALLOW_LIVE_CHANGES[$id]}; then allow_live_changes=true; fi
     remote="$REMOTE/$SERVER_ID/$id"
     log "$id: checking for changes."
@@ -130,7 +174,7 @@ backup_app() {
     log "$id: uploading $name ($bytes bytes); containers have restarted."
     rclone_run copyto "$archive" "$remote/$name"
     verification=download-sha256
-    if $skip_hash_check; then
+    if ! $hash_check; then
         log "$id: checking uploaded size; full readback skipped."
         rclone_run lsjson "$remote/$name" --stat > "$work/remote-stat.json"
         [[ $(jq -er '.Size' "$work/remote-stat.json") == "$bytes" ]] || die "App $id: uploaded size did not match. Local success state was not updated."

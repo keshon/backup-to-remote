@@ -2,6 +2,10 @@
 set -Eeuo pipefail
 shopt -s inherit_errexit
 umask 077
+original_args=("$@")
+worker_mode=false
+if [[ ${BACKUP_WORKER_PARENT:-} == "$PPID" ]]; then worker_mode=true; fi
+unset BACKUP_WORKER_PARENT
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=lib/common.sh
@@ -21,19 +25,21 @@ Start here:
 Everyday use:
   bash backup.sh status               Read the last result; no cloud access
   bash backup.sh space                Read cloud capacity
+  bash backup.sh stop                 Cancel the active run and wait for cleanup
 
 Options:
   --config FILE                      Settings (default: backup.conf beside script)
   --json                             JSON on stdout; progress on stderr
   --force                            Save even if the folder is unchanged
-  --skip-hash-check                   Check uploaded size instead of downloading it
+  --hash-check                        Download upload to verify SHA-256 (default: OFF)
+  --skip-hash-check                   Keep size-only verification (compatibility)
   --allow-live-changes                Accept files changing during archive creation
   --help                             Show this guide
 
 Ubuntu: missing tools are installed on first use with root or passwordless sudo.
 No services, timers, or commands are installed. Run manually or through n8n.
-Both skip options can also be set per app in backup.conf:
-  app website /opt/dockers/website --skip-hash-check --allow-live-changes
+Hash checking and live changes can also be set per app in backup.conf:
+  app website /opt/dockers/website --hash-check --allow-live-changes
 Command-line options apply to every app.
 Supply RCLONE_CONFIG_CONTENT (base64) per run, or paste it at the hidden prompt.
 It is passed to rclone as environment settings, never written to a config file.
@@ -44,7 +50,7 @@ command=run
 config="$SCRIPT_DIR/backup.conf"
 json=false
 force=false
-skip_hash_check=false
+hash_check_override=''
 allow_live_changes=false
 if (($#)) && [[ $1 != -* ]]; then command=$1; shift; fi
 while (($#)); do
@@ -56,7 +62,8 @@ while (($#)); do
             config=$2; shift 2 ;;
         --json) json=true; shift ;;
         --force) force=true; shift ;;
-        --skip-hash-check) skip_hash_check=true; shift ;;
+        --hash-check) hash_check_override=true; shift ;;
+        --skip-hash-check) hash_check_override=false; shift ;;
         --allow-live-changes) allow_live_changes=true; shift ;;
         --help|-h) usage; exit 0 ;;
         *) die "Unknown option: $1. Run: bash backup.sh --help" ;;
@@ -69,12 +76,13 @@ case $command in
         cp -- "$SCRIPT_DIR/backup.conf.example" "$config"
         printf 'Settings created: %s\nEdit SERVER_ID, REMOTE, and the app lines, then run:\n  bash %q plan --config %q\n' "$config" "$SCRIPT_DIR/backup.sh" "$config"
         exit 0 ;;
-    run|plan|status|space) ;;
-    *) die "Unknown command: $command. Choose run, plan, status, space, or init. Run: bash backup.sh --help" ;;
+    run|plan|status|space|stop) ;;
+    *) die "Unknown command: $command. Choose run, plan, status, space, stop, or init. Run: bash backup.sh --help" ;;
 esac
 
 bootstrap
 load_settings "$config"
+if [[ $command == stop ]]; then stop_run; exit 0; fi
 if [[ $command == status ]]; then
     [[ -f $STATE_DIR/last-run.json ]] || die 'No saved run yet. Start with: bash backup.sh plan'
     if $json; then cat -- "$STATE_DIR/last-run.json"; else show_result "$STATE_DIR/last-run.json"; fi
@@ -86,10 +94,10 @@ if [[ $command == plan ]]; then
     for id in "${APP_IDS[@]}"; do
         printf '\n%s: %s\n' "$id" "${APP_PATHS[$id]}"
         if [[ -n ${APP_STOPS[$id]} ]]; then printf '  Briefly stop: %s\n' "${APP_STOPS[$id]//$'\n'/, }"; else printf '  Copy live files (use --stop for databases and WAL stores).\n'; fi
-        if $skip_hash_check || ${APP_SKIP_HASH_CHECK[$id]}; then
-            printf '  Upload verification: remote size only.\n'
-        else
+        if ${hash_check_override:-${APP_HASH_CHECK[$id]}}; then
             printf '  Upload verification: full SHA-256 readback.\n'
+        else
+            printf '  Upload verification: remote size only.\n'
         fi
         if $allow_live_changes || ${APP_ALLOW_LIVE_CHANGES[$id]}; then
             printf '  Changing files: accepted (best-effort archive).\n'
@@ -100,6 +108,7 @@ if [[ $command == plan ]]; then
     printf '\nNo files uploaded or containers stopped. Keep %s archives per app.\n' "$KEEP"
     exit 0
 fi
+if [[ $command == run ]] && ! $worker_mode; then supervise_run; fi
 load_credentials
 if [[ $command == space ]]; then
     capacity=$(rclone_run about "$REMOTE" --json)
@@ -113,8 +122,8 @@ if [[ $command == space ]]; then
 fi
 
 mkdir -p -- "$STATE_DIR"
-exec 9>"$STATE_DIR/run.lock"
-flock -n 9 || die 'A backup is already running on this VPS. Wait for it to finish; do not delete run.lock.'
+# The supervisor acquired fd 9; retain it until container recovery finishes.
+[[ $worker_mode == true ]] || die 'Start backups through the normal run command.'
 work=$(mktemp -d "$STATE_DIR/run.XXXXXXXX")
 results='[]'
 failure=''
@@ -124,7 +133,7 @@ trap finish EXIT
 trap 'failure="Interrupted. Containers will be restarted before exit."; exit 130' INT
 trap 'failure="Terminated. Containers will be restarted before exit."; exit 143' TERM
 trap 'failure=${failure:-"An operation failed. Read $STATE_DIR/last-error.log on this VPS."}' ERR
-exec 2> >(tee "$STATE_DIR/last-error.log" >&2)
+exec 2> >(trap '' INT TERM HUP; exec tee "$STATE_DIR/last-error.log" 9>&- >&2)
 recover_containers
 mkdir -p -- "$STATE_DIR/apps"
 validate_sources

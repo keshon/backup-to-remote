@@ -7,10 +7,10 @@ bootstrap() {
     local tool
     local -a packages=()
     [[ $OSTYPE == linux* ]] || die 'Run this script on Ubuntu Linux. --help is available on other systems.'
-    for tool in jq rclone tar gzip flock sha256sum base64 realpath du df sort stat timeout; do
+    for tool in jq rclone tar gzip flock setsid sha256sum base64 realpath du df sort stat timeout; do
         command -v "$tool" >/dev/null && continue
         case $tool in
-            flock) packages+=(util-linux) ;;
+            flock|setsid) packages+=(util-linux) ;;
             sha256sum|base64|realpath|du|df|sort|stat|timeout) packages+=(coreutils) ;;
             *) packages+=("$tool") ;;
         esac
@@ -33,7 +33,7 @@ bootstrap() {
 }
 
 declare -a APP_IDS=()
-declare -A APP_PATHS=() APP_STOPS=() APP_EXCLUDES=() APP_SKIP_HASH_CHECK=() APP_ALLOW_LIVE_CHANGES=()
+declare -A APP_PATHS=() APP_STOPS=() APP_EXCLUDES=() APP_HASH_CHECK=() APP_ALLOW_LIVE_CHANGES=()
 
 app() {
     (($# >= 2)) || die 'An app needs a name and a folder. Example: app melodix /opt/dockers/melodix --stop melodix-app-1'
@@ -45,14 +45,15 @@ app() {
     APP_PATHS[$id]=$path
     APP_STOPS[$id]=''
     APP_EXCLUDES[$id]=''
-    APP_SKIP_HASH_CHECK[$id]=false
+    APP_HASH_CHECK[$id]=false
     APP_ALLOW_LIVE_CHANGES[$id]=false
     while (($#)); do
         case $1 in
-            --skip-hash-check) APP_SKIP_HASH_CHECK[$id]=true; shift; continue ;;
+            --hash-check) APP_HASH_CHECK[$id]=true; shift; continue ;;
+            --skip-hash-check) APP_HASH_CHECK[$id]=false; shift; continue ;;
             --allow-live-changes) APP_ALLOW_LIVE_CHANGES[$id]=true; shift; continue ;;
             --stop|--exclude) ;;
-            *) die "App $id: unknown option $1. Use --stop CONTAINER, --exclude PATTERN, --skip-hash-check, or --allow-live-changes." ;;
+            *) die "App $id: unknown option $1. Use --stop CONTAINER, --exclude PATTERN, --hash-check, or --allow-live-changes." ;;
         esac
         if (($# < 2)) || [[ -z $2 || $2 == --* || $2 == *$'\n'* ]]; then
             die "App $id: $1 needs a value on the same line."

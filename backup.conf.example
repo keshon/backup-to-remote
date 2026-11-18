@@ -8,9 +8,11 @@ RESERVE_MIB=512
 TIMEOUT_SECONDS=14400
 
 # app NAME ABSOLUTE_FOLDER [--stop CONTAINER] [--exclude PATTERN]
-#     [--skip-hash-check] [--allow-live-changes]
+#     [--hash-check] [--allow-live-changes]
 # Repeat --stop and --exclude when needed. Initially stopped containers stay stopped.
 app melodix /opt/dockers/melodix --stop melodix-app-1
-# app website /opt/dockers/keshon.ru --exclude './logs' --skip-hash-check --allow-live-changes
-# Flags above affect only website. Other apps keep full checks by default.
+# app website /opt/dockers/keshon.ru --exclude './logs' --allow-live-changes
+# Full uploaded hash checking is OFF by default (remote size is checked).
+# Add --hash-check to an app to download and verify its uploaded bytes.
+# app important /opt/dockers/important --hash-check --stop important-db
 # app n8n /opt/dockers/n8n --stop n8n-n8n-1
