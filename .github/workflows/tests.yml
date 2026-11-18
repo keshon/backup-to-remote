@@ -13,7 +13,8 @@ jobs:
         run: |
           scratch=$(mktemp -d)
           trap 'rm -rf -- "$scratch"' EXIT
-          printf 'SERVER_ID=bootstrap-test\nREMOTE=fixture:backups\nSTATE_DIR=%s/state\napp sample %s\n' "$scratch" "$scratch" > "$scratch/settings"
+          mkdir "$scratch/source"
+          printf 'SERVER_ID=bootstrap-test\nREMOTE=fixture:backups\nSTATE_DIR=%s/state\napp sample %s/source\n' "$scratch" "$scratch" > "$scratch/settings"
           sudo bash backup.sh plan --config "$scratch/settings"
           command -v rclone
           command -v jq
